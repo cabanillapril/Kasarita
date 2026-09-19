@@ -21,3 +21,151 @@ def test_chat_endpoint_returns_intent_and_reply():
     assert payload["status"] == "ok"
     assert payload["intent"] == "reminder"
     assert "reminder" in payload["reply"].lower()
+
+
+def test_audio_endpoint_accepts_16_bit_pcm(monkeypatch):
+    monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: None)
+    response = client.post(
+        "/audio",
+        content=b"\x00\x00\x01\x00",
+        headers={"Content-Type": "audio/pcm", "X-Device-Id": "dev-1"},
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "accepted",
+        "message": "Audio received; speech recognition is not configured.",
+        "bytes_received": 4,
+        "transcript": None,
+        "answer": None,
+        "action": None,
+        "device_id": "dev-1",
+    }
+
+
+def test_audio_endpoint_rejects_unknown_format():
+    response = client.post("/audio", content=b"audio", headers={"Content-Type": "audio/wav"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"
+
+
+def test_audio_endpoint_returns_ai_answer(monkeypatch):
+    monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "How do Python loops work?")
+
+    async def fake_tutor(question):
+        assert question == "How do Python loops work?"
+        return "answered", "A loop repeats a block of code."
+
+    monkeypatch.setattr("app.main.ask_ai_tutor", fake_tutor)
+    response = client.post(
+        "/audio",
+        content=b"\x00\x00\x01\x00",
+        headers={"Content-Type": "audio/pcm"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "answered"
+    assert response.json()["transcript"] == "How do Python loops work?"
+    assert response.json()["answer"] == "A loop repeats a block of code."
+
+
+def test_mcp_tools_can_create_and_complete_task():
+    tools_response = client.get("/mcp/tools")
+    assert tools_response.status_code == 200
+    assert {tool["name"] for tool in tools_response.json()["tools"]} == {
+        "create_task",
+        "get_tasks",
+        "complete_task",
+        "create_reminder",
+        "get_schedule",
+    }
+
+    create_response = client.post(
+        "/mcp/call",
+        json={"name": "create_task", "arguments": {"title": "Math homework"}},
+    )
+    created_task = create_response.json()["result"]
+    assert create_response.json()["status"] == "ok"
+    assert created_task["status"] == "pending"
+
+    complete_response = client.post(
+        "/mcp/call",
+        json={"name": "complete_task", "arguments": {"task_id": created_task["id"]}},
+    )
+    assert complete_response.json()["result"]["status"] == "completed"
+
+
+def test_mcp_rejects_unknown_tools():
+    response = client.post("/mcp/call", json={"name": "delete_everything", "arguments": {}})
+    assert response.json()["status"] == "error"
+
+
+def test_task_rest_endpoints(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "tasks.db"))
+    create_response = client.post("/tasks", json={"arguments": {"title": "REST task"}})
+    assert create_response.json()["status"] == "ok"
+    task = create_response.json()["task"]
+    assert create_response.json()["status"] == "ok"
+
+    list_response = client.get("/tasks")
+    assert any(item["id"] == task["id"] for item in list_response.json()["tasks"])
+
+    update_response = client.patch(
+        f"/tasks/{task['id']}",
+        json={"arguments": {"status": "completed"}},
+    )
+    assert update_response.json()["task"]["status"] == "completed"
+
+    delete_response = client.delete(f"/tasks/{task['id']}")
+    assert delete_response.json()["status"] == "ok"
+
+
+def test_voice_command_creates_task_without_ai(monkeypatch):
+    monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "add task Math homework tomorrow")
+    response = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
+
+    payload = response.json()
+    assert payload["status"] == "action_completed"
+    assert payload["action"]["tool"] == "create_task"
+    assert payload["action"]["result"]["title"] == "Math homework"
+    assert payload["action"]["result"]["due_date"] == "tomorrow"
+
+
+def test_voice_question_still_uses_ai(monkeypatch):
+    monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "How do Python loops work?")
+
+    async def fake_tutor(question):
+        return "answered", "A loop repeats code."
+
+    monkeypatch.setattr("app.main.ask_ai_tutor", fake_tutor)
+    response = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
+
+    assert response.json()["status"] == "answered"
+    assert response.json()["answer"] == "A loop repeats code."
+
+
+def test_mcp_data_survives_module_reload(tmp_path, monkeypatch):
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "kasarita.db"))
+    import importlib
+    import app.mcp as mcp
+
+    importlib.reload(mcp)
+    created = mcp.create_task("Persistent task")
+    importlib.reload(mcp)
+
+    saved_tasks = mcp.get_tasks()
+    assert any(task["id"] == created["id"] for task in saved_tasks)
+
+
+def test_ask_requires_configuration(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    response = client.post("/ask", json={"question": "How do Python loops work?"})
+    assert response.status_code == 200
+    assert response.json()["status"] == "not_configured"
+
+
+def test_ask_rejects_empty_questions():
+    response = client.post("/ask", json={"question": "   "})
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"

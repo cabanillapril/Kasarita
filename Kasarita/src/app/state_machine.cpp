@@ -39,11 +39,11 @@ void stateMachineUpdate()
 
             displayText("Playing...");
             playAudio(audio, bytes);
-            free(audio);
 
             displayText("Contacting backend...");
             String response;
-            bool ok = sendCommandToBackend("voice command from esp32", response);
+            bool ok = sendAudioToBackend(audio, bytes, response);
+            free(audio);
             if (ok)
             {
                 displayText(response);

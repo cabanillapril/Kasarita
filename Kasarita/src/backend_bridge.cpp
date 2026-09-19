@@ -5,7 +5,8 @@
 
 constexpr char WIFI_SSID[] = "B315_420";
 constexpr char WIFI_PASSWORD[] = "Tessaprilj123@";
-constexpr char BACKEND_URL[] = "http://192.168.1.14:8001/chat";
+constexpr char BACKEND_CHAT_URL[] = "http://192.168.1.14:8000/chat";
+constexpr char BACKEND_AUDIO_URL[] = "http://192.168.1.14:8000/audio";
 
 bool initNetwork()
 {
@@ -40,9 +41,9 @@ bool sendCommandToBackend(const String& command, String& response)
 
     HTTPClient http;
     Serial.print("Sending to backend: ");
-    Serial.println(BACKEND_URL);
+    Serial.println(BACKEND_CHAT_URL);
 
-    http.begin(BACKEND_URL);
+    http.begin(BACKEND_CHAT_URL);
     http.setTimeout(10000);
     http.addHeader("Content-Type", "application/json");
 
@@ -86,4 +87,56 @@ bool sendCommandToBackend(const String& command, String& response)
     Serial.print("HTTP error body: ");
     Serial.println(errorBody);
     return false;
+}
+
+bool sendAudioToBackend(const int16_t* audio, size_t bytes, String& response)
+{
+    if (WiFi.status() != WL_CONNECTED) {
+        response = "WiFi not connected";
+        return false;
+    }
+
+    if (audio == nullptr || bytes == 0 || bytes % sizeof(int16_t) != 0) {
+        response = "Invalid audio buffer";
+        return false;
+    }
+
+    HTTPClient http;
+    http.begin(BACKEND_AUDIO_URL);
+    http.setTimeout(15000);
+    http.addHeader("Content-Type", "audio/pcm");
+    http.addHeader("X-Device-Id", "esp32-s3");
+
+    uint8_t* payload = reinterpret_cast<uint8_t*>(const_cast<int16_t*>(audio));
+    int httpCode = http.POST(payload, bytes);
+    Serial.print("Audio HTTP code: ");
+    Serial.println(httpCode);
+    if (httpCode <= 0) {
+        response = "Audio upload failed";
+        http.end();
+        return false;
+    }
+
+    String body = http.getString();
+    http.end();
+    Serial.print("Audio response: ");
+    Serial.println(body);
+
+    DynamicJsonDocument responseDoc(512);
+    DeserializationError error = deserializeJson(responseDoc, body);
+    if (error) {
+        response = body;
+        return false;
+    }
+
+    if (responseDoc["answer"].is<String>()) {
+        response = responseDoc["answer"].as<String>();
+    } else if (responseDoc["transcript"].is<String>()) {
+        response = responseDoc["transcript"].as<String>();
+    } else {
+        response = responseDoc["message"].as<String>();
+        }
+
+        String status = responseDoc["status"].as<String>();
+        return status == "accepted" || status == "transcribed" || status == "answered";
 }
