@@ -72,13 +72,24 @@ export function computeStats(tasks) {
 
 export function speak(text) {
   try {
-    if ('speechSynthesis' in window) {
-      const u = new SpeechSynthesisUtterance(text)
-      u.rate = 1.02
+    if ('speechSynthesis' in window && text) {
+      const cleanText = text
+        .replace(/```[\s\S]*?```/g, '')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/[*#~_`|\[\]{}]/g, '')
+        .replace(/[-_]{2,}/g, ' ')
+        .trim()
+
+      if (!cleanText) return
+
+      const u = new SpeechSynthesisUtterance(cleanText)
+      u.rate = 1.0
+      u.pitch = 1.05
       window.speechSynthesis.cancel()
       window.speechSynthesis.speak(u)
     }
   } catch (e) {
-    // speech synthesis unavailable — the text response still shows in the log
+    // speech synthesis unavailable
   }
 }
+

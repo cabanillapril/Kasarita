@@ -38,7 +38,7 @@ void displayInit()
     display.setTextColor(SSD1306_WHITE);
     display.setTextWrap(false);
 
-    displayText("IntelliVo Ready");
+    displayText("Kasarita Ready");
 }
 
 

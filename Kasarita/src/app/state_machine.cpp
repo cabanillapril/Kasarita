@@ -1,4 +1,4 @@
-﻿#include "state_machine.h"
+#include "state_machine.h"
 
 #include "../backend_bridge.h"
 #include "../hardware/button.h"
@@ -16,7 +16,7 @@ void stateMachineUpdate()
     switch (current)
     {
         case IDLE:
-            if (buttonPressed())
+            if (buttonIsDown())
             {
                 current = LISTENING;
             }
@@ -27,7 +27,7 @@ void stateMachineUpdate()
             displayText("Recording...");
 
             size_t bytes = 0;
-            int16_t* audio = recordAudio(bytes);
+            int16_t* audio = recordAudioWhilePressed(bytes);
 
             if (audio == nullptr || bytes == 0)
             {
@@ -37,10 +37,7 @@ void stateMachineUpdate()
                 break;
             }
 
-            displayText("Playing...");
-            playAudio(audio, bytes);
-
-            displayText("Contacting backend...");
+            displayText("Sending...");
             String response;
             bool ok = sendAudioToBackend(audio, bytes, response);
             free(audio);
@@ -64,6 +61,7 @@ void stateMachineUpdate()
             displayText("Ready");
             break;
         }
+
 
         case PLAYING:
             break;

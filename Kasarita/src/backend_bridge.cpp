@@ -3,10 +3,10 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 
-constexpr char WIFI_SSID[] = "B315_420";
-constexpr char WIFI_PASSWORD[] = "Tessaprilj123@";
-constexpr char BACKEND_CHAT_URL[] = "http://192.168.1.14:8000/chat";
-constexpr char BACKEND_AUDIO_URL[] = "http://192.168.1.14:8000/audio";
+constexpr char WIFI_SSID[] = "esp32";
+constexpr char WIFI_PASSWORD[] = "12345678";
+constexpr char BACKEND_CHAT_URL[] = "http://192.168.68.163:8000/chat";
+constexpr char BACKEND_AUDIO_URL[] = "http://192.168.68.163:8000/audio";
 
 bool initNetwork()
 {

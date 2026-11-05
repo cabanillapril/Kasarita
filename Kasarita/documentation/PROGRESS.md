@@ -1,12 +1,13 @@
 # Kasarita Progress
 
-Last updated: 2026-09-19
+Last updated: 2026-09-20
 
 ## Overall Status
 
-Current stage: **working voice assistant prototype with persistent Supabase task storage**.
+Current stage: **working voice assistant prototype with flexible task voice controls, persistent storage, and Groq AI tutoring**.
 
-The device can record speech, send it to the backend, transcribe it with Whisper, route commands to task tools, and send ordinary questions to an AI tutor. Supabase task creation has been verified through the backend API.
+The device can record speech, send it to the backend, transcribe it with Whisper, route flexible natural commands to MCP task tools (handling transcription punctuation artifacts), and send student questions to the Groq AI tutor (`groq/compound-mini`).
+
 
 ## Completed Milestones
 

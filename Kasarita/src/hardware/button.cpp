@@ -13,17 +13,17 @@ void buttonInit()
 
 
 
+bool buttonIsDown()
+{
+    return digitalRead(BUTTON_PIN) == LOW;
+}
+
 bool buttonPressed()
 {
-    if(digitalRead(BUTTON_PIN)==LOW)
+    if (digitalRead(BUTTON_PIN) == LOW)
     {
-        delay(50);
-
-        while(
-        digitalRead(BUTTON_PIN)==LOW);
-
-        return true;
+        delay(30);
+        return digitalRead(BUTTON_PIN) == LOW;
     }
-
     return false;
-}
+}

@@ -51,10 +51,14 @@ def test_audio_endpoint_rejects_unknown_format():
 def test_audio_endpoint_returns_ai_answer(monkeypatch):
     monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "How do Python loops work?")
 
+    async def fake_ai_route(transcript, bytes_received, device_id):
+        return None
+
     async def fake_tutor(question):
         assert question == "How do Python loops work?"
         return "answered", "A loop repeats a block of code."
 
+    monkeypatch.setattr("app.main.ai_route_and_execute", fake_ai_route)
     monkeypatch.setattr("app.main.ask_ai_tutor", fake_tutor)
     response = client.post(
         "/audio",
@@ -68,6 +72,9 @@ def test_audio_endpoint_returns_ai_answer(monkeypatch):
     assert response.json()["answer"] == "A loop repeats a block of code."
 
 
+
+
+
 def test_mcp_tools_can_create_and_complete_task():
     tools_response = client.get("/mcp/tools")
     assert tools_response.status_code == 200
@@ -75,9 +82,11 @@ def test_mcp_tools_can_create_and_complete_task():
         "create_task",
         "get_tasks",
         "complete_task",
+        "delete_task",
         "create_reminder",
         "get_schedule",
     }
+
 
     create_response = client.post(
         "/mcp/call",
@@ -135,14 +144,21 @@ def test_voice_command_creates_task_without_ai(monkeypatch):
 def test_voice_question_still_uses_ai(monkeypatch):
     monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "How do Python loops work?")
 
+    async def fake_ai_route(transcript, bytes_received, device_id):
+        return None
+
     async def fake_tutor(question):
         return "answered", "A loop repeats code."
 
+    monkeypatch.setattr("app.main.ai_route_and_execute", fake_ai_route)
     monkeypatch.setattr("app.main.ask_ai_tutor", fake_tutor)
     response = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
 
     assert response.json()["status"] == "answered"
     assert response.json()["answer"] == "A loop repeats code."
+
+
+
 
 
 def test_mcp_data_survives_module_reload(tmp_path, monkeypatch):
@@ -169,3 +185,34 @@ def test_ask_rejects_empty_questions():
     response = client.post("/ask", json={"question": "   "})
     assert response.status_code == 200
     assert response.json()["status"] == "error"
+
+
+def test_flexible_voice_task_commands(monkeypatch):
+    # 1. New task with flexible prefix
+    monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "new task Read documentation tomorrow")
+    res1 = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
+    assert res1.json()["status"] == "action_completed"
+    assert res1.json()["action"]["tool"] == "create_task"
+    assert res1.json()["action"]["result"]["title"] == "Read documentation"
+    assert res1.json()["action"]["result"]["due_date"] == "tomorrow"
+
+    # 2. Add a task to prefix
+    monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "add a task to study embedded systems")
+    res2 = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
+    assert res2.json()["status"] == "action_completed"
+    assert res2.json()["action"]["result"]["title"] == "study embedded systems"
+
+    # 3. List tasks
+    monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "show tasks")
+    res3 = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
+    assert res3.json()["status"] == "action_completed"
+    assert res3.json()["action"]["tool"] == "get_tasks"
+
+    # 5. Punctuated transcript from Whisper (e.g. comma after task)
+    monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "Add task, finish embedded systems lab.")
+    res5 = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
+    assert res5.json()["status"] == "action_completed"
+    assert res5.json()["action"]["tool"] == "create_task"
+    assert res5.json()["action"]["result"]["title"] == "finish embedded systems lab"
+
+
