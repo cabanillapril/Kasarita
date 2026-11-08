@@ -16,10 +16,10 @@ const SUBJECTS = [
 ]
 
 const DURATIONS = [
-  { label: '15 min', minutes: 15, desc: 'Quick burst' },
+  { label: '10 min', minutes: 10, desc: 'Rest & Review' },
+  { label: '15 min', minutes: 15, desc: 'Quick Burst' },
   { label: '25 min', minutes: 25, desc: 'Pomodoro' },
-  { label: '45 min', minutes: 45, desc: 'Deep work' },
-  { label: '60 min', minutes: 60, desc: 'Power hour' }
+  { label: '90 min', minutes: 90, desc: 'Deep Work' }
 ]
 
 const TECHNIQUES = [
@@ -247,8 +247,8 @@ export default function Study() {
                   className={`duration-btn ${selectedDuration === d.minutes ? 'active' : ''}`}
                   onClick={() => setSelectedDuration(d.minutes)}
                 >
-                  <span style={{ fontWeight: '800', fontSize: '1.15rem' }}>{d.label}</span>
-                  <span style={{ fontSize: '0.75rem', color: selectedDuration === d.minutes ? 'rgba(255,255,255,0.8)' : 'var(--text-muted)' }}>{d.desc}</span>
+                  <span className="duration-label">{d.label}</span>
+                  <span className="duration-desc">{d.desc}</span>
                 </button>
               ))}
             </div>

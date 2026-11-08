@@ -75,7 +75,7 @@ export default function Dashboard() {
           <h1>Welcome back, {currentUser?.name?.split(' ')[0] || 'Student'}! </h1>
           <p className="page-subtitle">Here is your study command center and learning progress for today.</p>
         </div>
-        <button className="btn btn-emerald" onClick={() => startStudySession('Coding', 25)}>
+        <button className="btn btn-primary" onClick={() => startStudySession('Coding', 25)}>
           <Timer size={18} />
           Start 25m Focus Session
         </button>
@@ -125,7 +125,7 @@ export default function Dashboard() {
               <span style={{ fontWeight: '700', color: 'var(--accent-emerald)' }}>{completionRate}%</span>
             </div>
             <div className="xp-progress-bar" style={{ height: '8px' }}>
-              <div className="xp-progress-fill" style={{ width: `${completionRate}%`, background: 'var(--gradient-study)' }} />
+              <div className="xp-progress-fill" style={{ width: `${completionRate}%` }} />
             </div>
           </div>
         </div>
@@ -196,6 +196,7 @@ export default function Dashboard() {
             {quests.map((quest) => (
               <div
                 key={quest.id}
+                className={`dashboard-quest${quest.completed ? ' completed' : ''}`}
                 style={{
                   padding: '0.85rem 1rem',
                   borderRadius: 'var(--radius-md)',
@@ -212,7 +213,7 @@ export default function Dashboard() {
                   <div className={`task-checkbox ${quest.completed ? 'checked' : ''}`}>
                     {quest.completed ? <CheckCircle2 size={16} /> : <Circle size={16} />}
                   </div>
-                  <span style={{ fontWeight: '600', fontSize: '0.9rem', textDecoration: quest.completed ? 'line-through' : 'none' }}>
+                  <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>
                     {quest.title}
                   </span>
                 </div>
@@ -276,6 +277,7 @@ export default function Dashboard() {
             {recentMessages.map((msg) => (
               <div
                 key={msg.id}
+                className="activity-entry"
                 style={{
                   padding: '0.75rem 1rem',
                   borderRadius: 'var(--radius-md)',

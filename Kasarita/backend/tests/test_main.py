@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from types import SimpleNamespace
 
 from app.main import app
 
@@ -9,6 +10,36 @@ def test_health_endpoint():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+def test_tts_endpoint_returns_16khz_pcm(monkeypatch):
+    audio = b"\x01\x00\x02\x00\x03\x00\x04\x00"
+    chunk = SimpleNamespace(
+        audio_int16_bytes=audio,
+        sample_rate=16000,
+        sample_width=2,
+        sample_channels=1,
+    )
+    voice = SimpleNamespace(synthesize=lambda text: iter([chunk]))
+    monkeypatch.setattr("app.main.get_piper_voice", lambda: voice)
+
+    response = client.post("/tts", json={"text": "Hello Kasarita"})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "audio/pcm"
+    assert response.headers["x-audio-sample-rate"] == "16000"
+    assert response.content == audio
+
+
+def test_tts_endpoint_reports_missing_voice_model(monkeypatch):
+    def missing_voice():
+        from app.main import TTSNotConfiguredError
+        raise TTSNotConfiguredError("Piper voice model is not configured.")
+
+    monkeypatch.setattr("app.main.get_piper_voice", missing_voice)
+    response = client.post("/tts", json={"text": "Hello"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Piper voice model is not configured."
 
 
 def test_chat_endpoint_returns_intent_and_reply():
@@ -214,5 +245,4 @@ def test_flexible_voice_task_commands(monkeypatch):
     assert res5.json()["status"] == "action_completed"
     assert res5.json()["action"]["tool"] == "create_task"
     assert res5.json()["action"]["result"]["title"] == "finish embedded systems lab"
-
 

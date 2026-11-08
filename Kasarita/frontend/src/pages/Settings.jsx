@@ -42,13 +42,12 @@ function Toggle({ checked, onChange, id }) {
 }
 
 export default function Settings() {
-  const { currentUser, state, logout, showToast } = useApp()
+  const { currentUser, state, logout, showToast, theme, setTheme } = useApp()
   const [deviceStatus, setDeviceStatus] = useState(state?.device || { connected: false })
   const [checking, setChecking] = useState(false)
 
   // Local preferences state
   const [prefs, setPrefs] = useState({
-    darkMode: true,
     soundEnabled: true,
     notifications: true,
     autoSync: true,
@@ -141,8 +140,8 @@ export default function Settings() {
         {/* Preferences */}
         <Section title="App Preferences" icon={<Moon size={18} />}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0rem' }}>
-            <SettingRow label="Dark Mode" desc="Keep dark theme enabled">
-              <Toggle id="dark-mode-toggle" checked={prefs.darkMode} onChange={(v) => setPref('darkMode', v)} />
+            <SettingRow label="Dark Mode" desc="Use a darker color palette">
+              <Toggle id="dark-mode-toggle" checked={theme === 'dark'} onChange={(enabled) => setTheme(enabled ? 'dark' : 'light')} />
             </SettingRow>
             <SettingRow label="Sound Effects" desc="XP and completion chimes">
               <Toggle id="sound-toggle" checked={prefs.soundEnabled} onChange={(v) => setPref('soundEnabled', v)} />
@@ -225,8 +224,8 @@ export default function Settings() {
         {/* Danger Zone */}
         <Section title="Data & Privacy" icon={<Shield size={18} />}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-            <div style={{ padding: '0.85rem 1rem', background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-              All task and progress data is stored locally in your browser. No account data is sent to external servers.
+            <div style={{ padding: '0.85rem 1rem', background: 'var(--bg-card)', border: '1px solid var(--border-card)', borderRadius: 'var(--radius-md)', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+              Your information is securely protected.
             </div>
             <button
               id="export-data-btn"

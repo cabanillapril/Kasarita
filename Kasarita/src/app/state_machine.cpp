@@ -39,14 +39,30 @@ void stateMachineUpdate()
 
             displayText("Sending...");
             String response;
-            bool ok = sendAudioToBackend(audio, bytes, response);
+            bool hasAnswer = false;
+            bool ok = sendAudioToBackend(audio, bytes, response, hasAnswer);
             free(audio);
             if (ok)
             {
                 displayText(response);
-                playTone(880, 120);
-                delay(80);
-                playTone(1320, 120);
+                if (hasAnswer)
+                {
+                    String speechError;
+                    if (!speakTextWithBackend(response, speechError))
+                    {
+                        Serial.print("TTS playback failed: ");
+                        Serial.println(speechError);
+                        playTone(880, 120);
+                        delay(80);
+                        playTone(1320, 120);
+                    }
+                }
+                else
+                {
+                    playTone(880, 120);
+                    delay(80);
+                    playTone(1320, 120);
+                }
             }
             else
             {

@@ -4,7 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
-void speakerInit();
+bool speakerInit();
 
 void playAudio(
 int16_t* buffer,

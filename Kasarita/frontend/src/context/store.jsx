@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useRef, useState } from 'r
 import { uid, todayISO, fmtDate, cap, parseLooseDate, speak } from '../utils.js'
 
 const STORAGE_KEY = 'kasarita_state_v3'
+const THEME_STORAGE_KEY = 'kasarita_theme'
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 const WS_BASE = API_BASE.replace(/^http/, 'ws') + '/ws'
 
@@ -98,8 +99,18 @@ function loadState() {
   }
 }
 
+function loadTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY) === 'dark' ? 'dark' : 'light'
+  } catch (e) {
+    console.warn('Kasarita: using the default light theme.', e)
+    return 'light'
+  }
+}
+
 export function AppProvider({ children }) {
   const [state, setState] = useState(loadState)
+  const [theme, setTheme] = useState(loadTheme)
   const [route, setRoute] = useState('dashboard')
   const [modal, setModal] = useState({ type: null, payload: null })
   const [toast, setToast] = useState('')
@@ -121,6 +132,15 @@ export function AppProvider({ children }) {
       console.warn('Kasarita: could not save state.', e)
     }
   }, [state])
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, theme)
+    } catch (e) {
+      console.warn('Kasarita: could not save theme preference.', e)
+    }
+  }, [theme])
 
   // Study Timer Interval Tick
   useEffect(() => {
@@ -498,6 +518,8 @@ export function AppProvider({ children }) {
     userData,
     level,
     xp,
+    theme,
+    setTheme,
     currentLevelXp,
     xpToNextLevel,
     route,

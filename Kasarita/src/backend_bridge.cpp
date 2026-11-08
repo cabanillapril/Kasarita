@@ -2,11 +2,16 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include "driver/i2s.h"
+#include "hardware/speaker.h"
+#include "../include/pins.h"
 
 constexpr char WIFI_SSID[] = "esp32";
 constexpr char WIFI_PASSWORD[] = "12345678";
-constexpr char BACKEND_CHAT_URL[] = "http://192.168.68.163:8000/chat";
-constexpr char BACKEND_AUDIO_URL[] = "http://192.168.68.163:8000/audio";
+constexpr char BACKEND_CHAT_URL[] = "http://10.212.62.189:8000/chat";
+constexpr char BACKEND_AUDIO_URL[] = "http://10.212.62.189:8000/audio";
+constexpr char BACKEND_TTS_URL[] = "http://10.212.62.189:8000/tts";
+constexpr uint32_t SPEAKER_DMA_DRAIN_MS = (8UL * 1024UL * 1000UL) / 16000UL;
 
 bool initNetwork()
 {
@@ -89,8 +94,9 @@ bool sendCommandToBackend(const String& command, String& response)
     return false;
 }
 
-bool sendAudioToBackend(const int16_t* audio, size_t bytes, String& response)
+bool sendAudioToBackend(const int16_t* audio, size_t bytes, String& response, bool& hasAnswer)
 {
+    hasAnswer = false;
     if (WiFi.status() != WL_CONNECTED) {
         response = "WiFi not connected";
         return false;
@@ -122,21 +128,112 @@ bool sendAudioToBackend(const int16_t* audio, size_t bytes, String& response)
     Serial.print("Audio response: ");
     Serial.println(body);
 
-    DynamicJsonDocument responseDoc(512);
+    DynamicJsonDocument responseDoc(2048);
     DeserializationError error = deserializeJson(responseDoc, body);
     if (error) {
         response = body;
         return false;
     }
 
-    if (responseDoc["answer"].is<String>()) {
+    if (responseDoc["answer"].is<String>() && !responseDoc["answer"].as<String>().isEmpty()) {
         response = responseDoc["answer"].as<String>();
+        hasAnswer = true;
     } else if (responseDoc["transcript"].is<String>()) {
         response = responseDoc["transcript"].as<String>();
     } else {
         response = responseDoc["message"].as<String>();
         }
 
-        String status = responseDoc["status"].as<String>();
-        return status == "accepted" || status == "transcribed" || status == "answered";
+    String status = responseDoc["status"].as<String>();
+    return status == "accepted" || status == "transcribed" ||
+           status == "answered" || status == "action_completed";
+}
+
+bool speakTextWithBackend(const String& text, String& error)
+{
+    if (WiFi.status() != WL_CONNECTED) {
+        error = "WiFi not connected";
+        return false;
+    }
+
+    HTTPClient http;
+    const char* responseHeaders[] = {"Content-Type", "X-Audio-Sample-Rate"};
+    http.collectHeaders(responseHeaders, 2);
+    http.begin(BACKEND_TTS_URL);
+    http.setTimeout(60000);
+    http.addHeader("Content-Type", "application/json");
+
+    DynamicJsonDocument requestDoc(2048);
+    requestDoc["text"] = text;
+    String payload;
+    serializeJson(requestDoc, payload);
+
+    const int httpCode = http.POST(payload);
+    if (httpCode != HTTP_CODE_OK) {
+        Serial.printf("TTS HTTP request failed: %d\n", httpCode);
+        error = httpCode > 0 ? http.getString() : "TTS request failed";
+        http.end();
+        return false;
+    }
+
+    const String contentType = http.header("Content-Type");
+    const String sampleRate = http.header("X-Audio-Sample-Rate");
+    const int contentLength = http.getSize();
+    Serial.printf("TTS response: type=%s rate=%s bytes=%d\n",
+                  contentType.c_str(), sampleRate.c_str(), contentLength);
+    if (!contentType.startsWith("audio/pcm") || sampleRate != "16000" ||
+        contentLength <= 0 || contentLength % 2 != 0) {
+        error = "Invalid TTS audio response";
+        http.end();
+        return false;
+    }
+
+    WiFiClient* stream = http.getStreamPtr();
+    uint8_t buffer[1024];
+    int remaining = contentLength;
+    bool playbackOk = true;
+    digitalWrite(I2S_SD_SPK, HIGH);
+    delay(10);
+    while (remaining > 0) {
+        const int available = stream->available();
+        if (available <= 0) {
+            if (!http.connected()) {
+                playbackOk = false;
+                break;
+            }
+            delay(1);
+            continue;
+        }
+
+        const size_t requested = min(static_cast<size_t>(available), sizeof(buffer));
+        const size_t chunkSize = min(requested, static_cast<size_t>(remaining)) & ~static_cast<size_t>(1);
+        if (chunkSize == 0) {
+            delay(1);
+            continue;
+        }
+        const size_t bytesRead = stream->readBytes(buffer, chunkSize);
+        if (bytesRead == 0) {
+            playbackOk = false;
+            break;
+        }
+
+        size_t bytesWritten = 0;
+        const esp_err_t writeResult = i2s_write(I2S_NUM_1, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
+        if (writeResult != ESP_OK || bytesWritten != bytesRead) {
+            playbackOk = false;
+            break;
+        }
+        remaining -= bytesRead;
+    }
+    if (playbackOk && remaining == 0) {
+        delay(SPEAKER_DMA_DRAIN_MS);
+    }
+    digitalWrite(I2S_SD_SPK, LOW);
+    http.end();
+
+    if (!playbackOk || remaining != 0) {
+        error = "TTS audio playback was interrupted";
+        return false;
+    }
+    return true;
 }

@@ -27,10 +27,7 @@ function TaskCard({ task, onToggle, onDelete, onEdit }) {
   const isOverdue = task.due && !isDone && new Date(task.due) < new Date()
 
   return (
-    <div
-      className="task-card"
-      style={{ opacity: isDone ? 0.65 : 1 }}
-    >
+    <div className="task-card">
       <div className="task-card-top">
         <button
           className={`task-checkbox ${isDone ? 'checked' : ''}`}
@@ -43,7 +40,7 @@ function TaskCard({ task, onToggle, onDelete, onEdit }) {
         <div className="task-card-body">
           <div
             className="task-title"
-            style={{ textDecoration: isDone ? 'line-through' : 'none', color: isDone ? 'var(--text-muted)' : 'var(--text-main)' }}
+            style={{ color: 'var(--text-main)' }}
           >
             {task.title}
           </div>

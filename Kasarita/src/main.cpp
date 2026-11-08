@@ -17,7 +17,12 @@ void setup()
     displayInit();
     buttonInit();
     microphoneInit();
-    speakerInit();
+    if (speakerInit()) {
+        Serial.println("Playing speaker self-test tone.");
+        playTone(880, 180);
+    } else {
+        displayText("Speaker init failed");
+    }
 
     if (initNetwork()) {
         String response;

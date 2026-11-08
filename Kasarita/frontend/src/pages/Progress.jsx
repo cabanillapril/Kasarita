@@ -56,12 +56,12 @@ function AchievementCard({ ach }) {
 function XpMilestone({ label, xp, current, color }) {
   const pct = Math.min(100, (current / xp) * 100)
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-      <div style={{ width: '110px', fontSize: '0.82rem', color, fontWeight: '600', flexShrink: 0 }}>{label}</div>
-      <div className="xp-progress-bar" style={{ flex: 1, height: '8px' }}>
+    <div className="xp-milestone-row" style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+      <div style={{ width: '100px', fontSize: '0.82rem', color, fontWeight: '600', flexShrink: 0 }}>{label}</div>
+      <div className="xp-progress-bar xp-milestone-bar" style={{ flex: 1, height: '8px' }}>
         <div className="xp-progress-fill" style={{ width: `${pct}%`, background: color }} />
       </div>
-      <div style={{ width: '70px', textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)', flexShrink: 0 }}>
+      <div className="xp-milestone-count" style={{ width: '96px', textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-muted)', flexShrink: 0 }}>
         {current} / {xp}
       </div>
     </div>
@@ -210,7 +210,7 @@ export default function Progress() {
               {quests.map((q) => (
                 <div key={q.id} className={`quest-row ${q.completed ? 'done' : ''}`}>
                   <span style={{ fontSize: '1rem' }}>{q.completed ? '✅' : '⭕'}</span>
-                  <span style={{ flex: 1, fontSize: '0.9rem', textDecoration: q.completed ? 'line-through' : 'none', color: q.completed ? 'var(--text-muted)' : 'var(--text-main)' }}>
+                  <span style={{ flex: 1, fontSize: '0.9rem', color: 'var(--text-main)' }}>
                     {q.title}
                   </span>
                   <span style={{ fontSize: '0.8rem', fontWeight: '700', color: 'var(--accent-pink)' }}>

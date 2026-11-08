@@ -1,5 +1,5 @@
 import React from 'react'
-import { LayoutDashboard, MessageSquare, CheckSquare, Timer, Award, Settings, LogOut, Sparkles, X } from 'lucide-react'
+import { LayoutDashboard, MessageSquare, CheckSquare, Timer, Award, Settings, LogOut, Bot, X } from 'lucide-react'
 import { useApp } from '../context/store.jsx'
 
 const NAV = [
@@ -32,7 +32,7 @@ export default function Sidebar({ open, onClose }) {
       <div className="sidebar-header">
         <div className="brand-logo" onClick={() => handleNav('dashboard')} style={{ cursor: 'pointer', margin: 0, padding: 0 }}>
           <div className="logo-icon">
-            <Sparkles size={22} />
+            <Bot size={22} />
           </div>
           <div>
             <div className="brand-title">Kasarita</div>
@@ -91,4 +91,3 @@ export default function Sidebar({ open, onClose }) {
     </aside>
   )
 }
-

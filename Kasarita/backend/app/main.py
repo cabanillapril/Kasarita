@@ -1,10 +1,15 @@
 import io
+import logging
 import os
+import sys
 import wave
+from array import array
 from functools import lru_cache
+from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 import httpx
 from pydantic import BaseModel, Field
 import json
@@ -26,6 +31,8 @@ from .mcp import (
 
 load_dotenv()
 initialize_database()
+logger = logging.getLogger(__name__)
+TTS_SAMPLE_RATE = 16000
 
 SYSTEM_PROMPT = (
     "You are Kasarita, a friendly, warm, and concise AI study companion and voice assistant for students. "
@@ -63,7 +70,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 # ─────────────────────────────────────────────────────────────────────────────
 
-app = FastAPI(title="IntelliVo Backend", version="0.1.0")
+app = FastAPI(title="Kasarita Backend", version="0.1.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -94,6 +101,12 @@ class AskResponse(BaseModel):
     answer: str
     device_id: Optional[str] = None
 
+class TTSRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=600)
+
+class TTSNotConfiguredError(RuntimeError):
+    pass
+
 class AudioResponse(BaseModel):
     status: str
     message: str
@@ -123,6 +136,26 @@ async def _invoke_ai_tutor(question: str, session_id: str = "default") -> tuple[
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+@app.post("/tts")
+async def text_to_speech(req: TTSRequest):
+    text = clean_for_speech(req.text)
+    if not text:
+        raise HTTPException(status_code=422, detail="Text must contain speakable content.")
+
+    try:
+        pcm_audio = await run_in_threadpool(synthesize_speech_pcm, text)
+    except TTSNotConfiguredError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except Exception as error:
+        logger.exception("Piper speech synthesis failed.")
+        raise HTTPException(status_code=500, detail="Speech synthesis failed; check backend logs.") from error
+
+    return Response(
+        content=pcm_audio,
+        media_type="audio/pcm",
+        headers={"X-Audio-Sample-Rate": str(TTS_SAMPLE_RATE)},
+    )
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
@@ -558,6 +591,74 @@ async def audio(request: Request):
     return resp
 
 
+@lru_cache(maxsize=1)
+def get_piper_voice():
+    model_setting = os.getenv("PIPER_MODEL", "models/en_US-lessac-medium.onnx")
+    model_path = Path(model_setting)
+    if not model_path.is_absolute():
+        model_path = Path(__file__).resolve().parents[1] / model_path
+    if not model_path.is_file():
+        raise TTSNotConfiguredError(
+            f"Piper voice model not found at {model_path}. Install a Piper voice model "
+            "and set PIPER_MODEL in backend/.env."
+        )
+
+    try:
+        from piper import PiperVoice
+    except ImportError as error:
+        raise TTSNotConfiguredError(
+            "Piper is not installed. Install backend requirements to enable ESP32 speech."
+        ) from error
+
+    try:
+        return PiperVoice.load(str(model_path))
+    except Exception as error:
+        logger.exception("Could not load Piper model at %s.", model_path)
+        raise TTSNotConfiguredError(f"Could not load Piper voice model at {model_path}.") from error
+
+
+def synthesize_speech_pcm(text: str) -> bytes:
+    voice = get_piper_voice()
+    chunks = list(voice.synthesize(text))
+    if not chunks:
+        raise RuntimeError("Piper returned no audio.")
+
+    first = chunks[0]
+    source_rate = first.sample_rate
+    if first.sample_width != 2 or first.sample_channels != 1 or source_rate <= 0:
+        raise RuntimeError("Piper voice must produce mono 16-bit PCM audio.")
+    if any(
+        chunk.sample_rate != source_rate
+        or chunk.sample_width != 2
+        or chunk.sample_channels != 1
+        for chunk in chunks
+    ):
+        raise RuntimeError("Piper returned audio chunks with inconsistent formats.")
+
+    samples = array("h")
+    for chunk in chunks:
+        samples.frombytes(chunk.audio_int16_bytes)
+    if sys.byteorder != "little":
+        samples.byteswap()
+
+    if source_rate == TTS_SAMPLE_RATE:
+        return samples.tobytes()
+
+    output_count = round((len(samples) - 1) * TTS_SAMPLE_RATE / source_rate) + 1
+    resampled = array("h")
+    for index in range(output_count):
+        source_position = index * source_rate / TTS_SAMPLE_RATE
+        left = int(source_position)
+        right = min(left + 1, len(samples) - 1)
+        fraction = source_position - left
+        sample = round(samples[left] + (samples[right] - samples[left]) * fraction)
+        resampled.append(max(-32768, min(32767, sample)))
+
+    if sys.byteorder != "little":
+        resampled.byteswap()
+    return resampled.tobytes()
+
+
 @app.get("/memory")
 def get_memory_endpoint(session_id: str = "default", limit: int = 20):
     return {"session_id": session_id, "messages": get_memory_messages(session_id, limit=limit)}
@@ -644,4 +745,3 @@ def generate_reply(text: str) -> tuple[str, str]:
         return "study", "Great idea. I can log your study session."
 
     return "general", f"You said: {text}"
-

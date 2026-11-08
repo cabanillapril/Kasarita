@@ -1,4 +1,4 @@
-# IntelliVo Backend
+# Kasarita Backend
 
 ## Run locally
 
@@ -13,6 +13,19 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ## Endpoints
 
 Set `OPENAI_API_KEY` in a local `.env` file to enable AI tutoring. Do not commit that file. The default SQLite database is stored at `backend/data/kasarita.db`.
+
+## ESP32 text-to-speech
+
+Kasarita uses Piper locally to synthesize replies for the ESP32 speaker. Install backend requirements, then download an English voice model from the Piper voice catalog:
+
+```powershell
+python -m pip install -r requirements.txt
+python -m piper.download_voices en_US-lessac-medium --download-dir models
+```
+
+Set `PIPER_MODEL=models/en_US-lessac-medium.onnx` in `backend/.env` (or configure another Piper `.onnx` voice model). Keep the model and its `.onnx.json` configuration together. Voice files are intentionally excluded from Git; review each voice model's card and dataset license before use.
+
+The backend exposes `POST /tts` with `{"text":"Hello"}` and responds with mono, 16-bit PCM at 16 kHz for the ESP32. The ESP32 plays replies through its MAX98357A speaker; the OLED and serial output remain available if speech synthesis is unavailable.
 
 To use Supabase instead of SQLite, set `SUPABASE_URL` and `SUPABASE_KEY` in `.env`, then run `supabase_schema.sql` in the Supabase SQL editor. When both values are present, MCP tools use Supabase automatically.
 

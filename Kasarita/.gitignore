@@ -4,4 +4,6 @@
 .vscode/launch.json
 .vscode/ipch
 backend/.env
+backend/.venv/
 backend/data/
+backend/models/
