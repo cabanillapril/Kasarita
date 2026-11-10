@@ -1,6 +1,7 @@
 import io
 import logging
 import os
+import sqlite3
 import sys
 import wave
 from array import array
@@ -238,8 +239,18 @@ async def chat(req: ChatRequest):
                 "device_id": req.device_id,
             })
             return ChatResponse(reply=reply_text, status="ok", intent="command", device_id=req.device_id)
-        except Exception:
-            pass
+        except (TypeError, ValueError, sqlite3.Error) as error:
+            logger.warning("Task/reminder command failed for %s: %s", tool_name, error)
+            reply_text = "I couldn't save that task or reminder. Please try again."
+            await manager.broadcast({
+                "reply": reply_text,
+                "transcript": req.text,
+                "status": "error",
+                "tool": tool_name,
+                "source": source,
+                "device_id": req.device_id,
+            })
+            return ChatResponse(reply=reply_text, status="error", intent="command", device_id=req.device_id)
 
     intent, fallback_reply = generate_reply(req.text)
     if intent in ("reminder", "timer", "study"):

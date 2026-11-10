@@ -2,8 +2,10 @@ import React, { useState } from 'react'
 import { useApp } from '../context/store.jsx'
 import {
   Settings as SettingsIcon, User, Bell, Wifi, Cpu, Moon, Volume2,
-  Key, Shield, Trash2, RefreshCw, ExternalLink, CheckCircle2
+  Key, Shield, Trash2, RefreshCw, ExternalLink, CheckCircle2,
+  BookOpen, Pencil, Plus, Check, X
 } from 'lucide-react'
+import { DEFAULT_SUBJECT_NAMES } from '../subjectConfig.js'
 
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -42,9 +44,12 @@ function Toggle({ checked, onChange, id }) {
 }
 
 export default function Settings() {
-  const { currentUser, state, logout, showToast, theme, setTheme } = useApp()
+  const { currentUser, state, userData, logout, showToast, theme, setTheme, updateSubjects } = useApp()
   const [deviceStatus, setDeviceStatus] = useState(state?.device || { connected: false })
   const [checking, setChecking] = useState(false)
+  const [newSubject, setNewSubject] = useState('')
+  const [editingSubject, setEditingSubject] = useState(null)
+  const [subjectDraft, setSubjectDraft] = useState('')
 
   // Local preferences state
   const [prefs, setPrefs] = useState({
@@ -56,9 +61,54 @@ export default function Settings() {
   })
 
   const user = currentUser || { name: 'Student', email: 'student@email.com' }
+  const subjects = Array.isArray(userData?.gamification?.subjects) && userData.gamification.subjects.length > 0
+    ? userData.gamification.subjects
+    : DEFAULT_SUBJECT_NAMES
 
   function setPref(key, val) {
     setPrefs((p) => ({ ...p, [key]: val }))
+  }
+
+  function addSubject(event) {
+    event.preventDefault()
+    const name = newSubject.trim()
+    if (!name) return
+    if (subjects.some((subject) => subject.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      showToast('A subject with that name already exists.')
+      return
+    }
+    if (updateSubjects([...subjects, name])) {
+      setNewSubject('')
+      showToast(`Added subject: ${name}`)
+    }
+  }
+
+  function saveSubjectEdit(event, oldName) {
+    event.preventDefault()
+    const name = subjectDraft.trim()
+    if (!name) {
+      showToast('Subject name cannot be empty.')
+      return
+    }
+    if (subjects.some((subject) => subject !== oldName && subject.toLocaleLowerCase() === name.toLocaleLowerCase())) {
+      showToast('A subject with that name already exists.')
+      return
+    }
+    if (updateSubjects(subjects.map((subject) => subject === oldName ? name : subject), { [oldName]: name })) {
+      setEditingSubject(null)
+      setSubjectDraft('')
+      showToast(`Renamed ${oldName} to ${name}. Study history was kept.`)
+    }
+  }
+
+  function removeSubject(name) {
+    if (subjects.length === 1) {
+      showToast('Keep at least one subject in your focus list.')
+      return
+    }
+    if (updateSubjects(subjects.filter((subject) => subject !== name))) {
+      showToast(`${name} removed from focus choices. Study history remains in Progress.`)
+    }
   }
 
   async function checkBackendConnection() {
@@ -183,6 +233,85 @@ export default function Settings() {
           </div>
         </Section>
       </div>
+
+      <Section title="Study Subjects" icon={<BookOpen size={18} />}>
+        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 0 }}>
+          These subjects appear in Study Focus. Renaming a subject keeps its study history; removing one only hides it from new sessions.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {subjects.map((subject) => (
+            <div key={subject} className="setting-row" style={{ gap: '0.75rem' }}>
+              {editingSubject === subject ? (
+                <form
+                  onSubmit={(event) => saveSubjectEdit(event, subject)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1 }}
+                >
+                  <input
+                    className="chat-input"
+                    aria-label={`Rename ${subject}`}
+                    value={subjectDraft}
+                    onChange={(event) => setSubjectDraft(event.target.value)}
+                    autoFocus
+                    maxLength={40}
+                  />
+                  <button className="btn btn-ghost" type="submit" aria-label="Save subject name" title="Save">
+                    <Check size={16} />
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    aria-label="Cancel subject rename"
+                    title="Cancel"
+                    onClick={() => setEditingSubject(null)}
+                  >
+                    <X size={16} />
+                  </button>
+                </form>
+              ) : (
+                <>
+                  <div style={{ fontWeight: '600', flex: 1 }}>{subject}</div>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    aria-label={`Edit ${subject}`}
+                    title={`Edit ${subject}`}
+                    onClick={() => {
+                      setEditingSubject(subject)
+                      setSubjectDraft(subject)
+                    }}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    type="button"
+                    aria-label={`Remove ${subject}`}
+                    title={`Remove ${subject}`}
+                    disabled={subjects.length === 1}
+                    onClick={() => removeSubject(subject)}
+                    style={{ color: 'var(--accent-rose)' }}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
+        <form onSubmit={addSubject} style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+          <input
+            className="chat-input"
+            aria-label="New subject name"
+            placeholder="Add a subject"
+            value={newSubject}
+            onChange={(event) => setNewSubject(event.target.value)}
+            maxLength={40}
+          />
+          <button className="btn btn-primary" type="submit" disabled={!newSubject.trim()}>
+            <Plus size={16} /> Add
+          </button>
+        </form>
+      </Section>
 
       <div className="grid-2">
         {/* Backend Connection */}

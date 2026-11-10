@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { Suspense, lazy, useState } from 'react'
 import { useApp } from './context/store.jsx'
 import Sidebar from './components/Sidebar.jsx'
 import Modal from './components/Modal.jsx'
@@ -13,12 +13,15 @@ import Progress from './pages/Progress.jsx'
 import Settings from './pages/Settings.jsx'
 import { Menu, X, Bot } from 'lucide-react'
 
+const Analytics = lazy(() => import('./pages/Analytics.jsx'))
+
 const PAGES = {
   dashboard: Dashboard,
   tasks: Tasks,
   chat: Chat,
   study: Study,
   progress: Progress,
+  analytics: Analytics,
   settings: Settings
 }
 
@@ -71,7 +74,9 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="main-content">
-        <Page />
+        <Suspense fallback={<div className="glass-card" role="status">Loading analytics...</div>}>
+          <Page />
+        </Suspense>
       </main>
 
       {modal.type === 'task' && (
@@ -89,4 +94,3 @@ export default function App() {
     </div>
   )
 }
-

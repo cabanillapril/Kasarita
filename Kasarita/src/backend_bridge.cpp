@@ -109,7 +109,7 @@ bool sendAudioToBackend(const int16_t* audio, size_t bytes, String& response, bo
 
     HTTPClient http;
     http.begin(BACKEND_AUDIO_URL);
-    http.setTimeout(15000);
+    http.setTimeout(60000);
     http.addHeader("Content-Type", "audio/pcm");
     http.addHeader("X-Device-Id", "esp32-s3");
 
@@ -118,7 +118,12 @@ bool sendAudioToBackend(const int16_t* audio, size_t bytes, String& response, bo
     Serial.print("Audio HTTP code: ");
     Serial.println(httpCode);
     if (httpCode <= 0) {
-        response = "Audio upload failed";
+        const String error = http.errorToString(httpCode);
+        response = String("Audio upload failed: ") + error;
+        Serial.printf("Audio upload failed after sending %u bytes: %d (%s)\n",
+                      static_cast<unsigned int>(bytes),
+                      httpCode,
+                      error.c_str());
         http.end();
         return false;
     }

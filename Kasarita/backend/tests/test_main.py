@@ -173,7 +173,10 @@ def test_audio_endpoint_returns_ai_answer(monkeypatch):
 
 
 
-def test_mcp_tools_can_create_and_complete_task():
+def test_mcp_tools_can_create_and_complete_task(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "mcp-tasks.db"))
     tools_response = client.get("/mcp/tools")
     assert tools_response.status_code == 200
     assert {tool["name"] for tool in tools_response.json()["tools"]} == {
@@ -190,10 +193,11 @@ def test_mcp_tools_can_create_and_complete_task():
 
     create_response = client.post(
         "/mcp/call",
-        json={"name": "create_task", "arguments": {"title": "Math homework"}},
+        json={"name": "create_task", "arguments": {"title": "math homework"}},
     )
     created_task = create_response.json()["result"]
     assert create_response.json()["status"] == "ok"
+    assert created_task["title"] == "Math homework"
     assert created_task["status"] == "pending"
 
     complete_response = client.post(
@@ -212,9 +216,13 @@ def test_task_rest_endpoints(tmp_path, monkeypatch):
     monkeypatch.delenv("SUPABASE_URL", raising=False)
     monkeypatch.delenv("SUPABASE_KEY", raising=False)
     monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "tasks.db"))
-    create_response = client.post("/tasks", json={"arguments": {"title": "REST task"}})
+    create_response = client.post(
+        "/tasks",
+        json={"arguments": {"title": "REST task", "subject": "Programming"}},
+    )
     assert create_response.json()["status"] == "ok"
     task = create_response.json()["task"]
+    assert task["subject"] == "Programming"
     assert create_response.json()["status"] == "ok"
 
     list_response = client.get("/tasks")
@@ -222,12 +230,74 @@ def test_task_rest_endpoints(tmp_path, monkeypatch):
 
     update_response = client.patch(
         f"/tasks/{task['id']}",
-        json={"arguments": {"status": "completed"}},
+        json={"arguments": {"title": "updated task title", "status": "completed", "subject": "Algorithms"}},
     )
+    assert update_response.json()["task"]["title"] == "Updated task title"
     assert update_response.json()["task"]["status"] == "completed"
+    assert update_response.json()["task"]["subject"] == "Algorithms"
 
     delete_response = client.delete(f"/tasks/{task['id']}")
     assert delete_response.json()["status"] == "ok"
+
+
+def test_legacy_task_database_adds_default_subject(tmp_path, monkeypatch):
+    import sqlite3
+    from app.mcp import get_tasks
+
+    database_path = tmp_path / "legacy-tasks.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL, due_date TEXT, "
+            "priority TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO tasks VALUES (?, ?, ?, ?, ?, ?)",
+            ("legacy-task", "Old task", None, "normal", "pending", "2030-01-01T00:00:00+00:00"),
+        )
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(database_path))
+
+    assert get_tasks()[0]["subject"] == "General"
+
+
+def test_create_voice_task_works_with_legacy_supabase_schema(monkeypatch):
+    from app.mcp import create_task
+
+    requests = []
+
+    def fake_supabase_request(method, table, **kwargs):
+        requests.append(kwargs["json"])
+        if "subject" in kwargs["json"]:
+            raise ValueError("Supabase returned HTTP 400: Could not find the 'subject' column in the schema cache")
+        return [{**kwargs["json"]}]
+
+    monkeypatch.setattr("app.mcp.use_supabase", lambda: True)
+    monkeypatch.setattr("app.mcp.supabase_request", fake_supabase_request)
+
+    task = create_task("Call Mom")
+
+    assert len(requests) == 2
+    assert "subject" in requests[0]
+    assert "subject" not in requests[1]
+    assert task["subject"] == "General"
+
+
+def test_custom_subject_requires_updated_supabase_schema(monkeypatch):
+    from app.mcp import create_task
+
+    def fake_supabase_request(method, table, **kwargs):
+        raise ValueError("Could not find the 'subject' column in the schema cache")
+
+    monkeypatch.setattr("app.mcp.use_supabase", lambda: True)
+    monkeypatch.setattr("app.mcp.supabase_request", fake_supabase_request)
+
+    try:
+        create_task("Call Mom", subject="Programming")
+    except ValueError as error:
+        assert "Run backend/supabase_schema.sql" in str(error)
+    else:
+        raise AssertionError("Expected updated Supabase schema to be required")
 
 
 def test_reminders_rest_endpoint(tmp_path, monkeypatch):
@@ -282,7 +352,10 @@ def test_existing_reminder_database_gets_pending_status_migration(tmp_path, monk
     }]
 
 
-def test_voice_command_creates_task_without_ai(monkeypatch):
+def test_voice_command_creates_task_without_ai(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "voice-task.db"))
     monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "add task Math homework tomorrow")
     response = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
 
@@ -292,6 +365,43 @@ def test_voice_command_creates_task_without_ai(monkeypatch):
     assert payload["action"]["result"]["title"] == "Math homework"
     from app.mcp import resolve_calendar_date
     assert payload["action"]["result"]["due_date"] == resolve_calendar_date("tomorrow")
+
+
+def test_set_up_review_tasks_voice_command_creates_task_not_reminder(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "review-tasks.db"))
+    monkeypatch.setattr(
+        "app.main.transcribe_pcm",
+        lambda audio_bytes: "I've set up the review tasks for programming languages on November 15, 2026",
+    )
+
+    response = client.post(
+        "/audio",
+        content=b"\x00\x00\x01\x00",
+        headers={"Content-Type": "audio/pcm", "X-Device-Id": "esp32-s3"},
+    )
+
+    payload = response.json()
+    assert payload["status"] == "action_completed"
+    assert payload["action"]["tool"] == "create_task"
+    assert payload["action"]["result"]["title"] == "Review tasks for programming languages"
+    assert payload["action"]["result"]["due_date"] == "2026-11-15"
+    assert len(client.get("/tasks").json()["tasks"]) == 1
+    assert client.get("/reminders").json()["reminders"] == []
+
+
+def test_command_storage_failure_does_not_claim_task_was_saved(monkeypatch):
+    monkeypatch.setattr(
+        "app.main.call_tool",
+        lambda tool_name, arguments: (_ for _ in ()).throw(ValueError("Storage unavailable")),
+    )
+
+    response = client.post("/chat", json={"text": "set up review tasks"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "error"
+    assert "couldn't save" in response.json()["reply"].lower()
 
 
 def test_spoken_calendar_dates_resolve_in_utc_calendar():
@@ -332,6 +442,22 @@ def test_spoken_calendar_dates_resolve_in_utc_calendar():
         "create_reminder",
         {"title": "call Mom", "remind_at": "2026-11-12"},
     )
+    assert interpret_command("remind me about my dentist appointment tomorrow") == (
+        "create_reminder",
+        {"title": "dentist appointment", "remind_at": "2026-11-11"},
+    )
+    assert interpret_command("add task about my programming assignment tomorrow") == (
+        "create_task",
+        {"title": "programming assignment", "due_date": "2026-11-11"},
+    )
+    assert interpret_command("set up review tasks for programming languages on November 15, 2026") == (
+        "create_task",
+        {"title": "review tasks for programming languages", "due_date": "2026-11-15"},
+    )
+    assert interpret_command("I've set up the review tasks for programming languages on November 15, 2026") == (
+        "create_task",
+        {"title": "review tasks for programming languages", "due_date": "2026-11-15"},
+    )
 
 
 def test_task_and_reminder_tools_normalize_spoken_dates(tmp_path, monkeypatch):
@@ -340,13 +466,13 @@ def test_task_and_reminder_tools_normalize_spoken_dates(tmp_path, monkeypatch):
     monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "calendar.db"))
     from app.mcp import create_reminder, create_task, resolve_calendar_date, update_task
 
-    task = create_task("Finish report due on November 10, 2030")
+    task = create_task("about my Finish report due on November 10, 2030")
     assert task["title"] == "Finish report"
     assert task["due_date"] == "2030-11-10"
     updated = update_task(task["id"], {"due_date": "November 11, 2030"})
     assert updated["due_date"] == "2030-11-11"
 
-    reminder = create_reminder("Call Mom tomorrow")
+    reminder = create_reminder("about my Call Mom tomorrow")
     assert reminder["title"] == "Call Mom"
     assert reminder["remind_at"] == resolve_calendar_date("tomorrow")
 
@@ -411,6 +537,8 @@ def test_voice_question_still_uses_ai(monkeypatch):
 
 
 def test_mcp_data_survives_module_reload(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
     monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "kasarita.db"))
     import importlib
     import app.mcp as mcp
@@ -436,7 +564,10 @@ def test_ask_rejects_empty_questions():
     assert response.json()["status"] == "error"
 
 
-def test_flexible_voice_task_commands(monkeypatch):
+def test_flexible_voice_task_commands(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "flexible-voice-tasks.db"))
     # 1. New task with flexible prefix
     monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "new task Read documentation tomorrow")
     res1 = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
@@ -450,7 +581,7 @@ def test_flexible_voice_task_commands(monkeypatch):
     monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "add a task to study embedded systems")
     res2 = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
     assert res2.json()["status"] == "action_completed"
-    assert res2.json()["action"]["result"]["title"] == "study embedded systems"
+    assert res2.json()["action"]["result"]["title"] == "Study embedded systems"
 
     # 3. List tasks
     monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "show tasks")
@@ -463,4 +594,4 @@ def test_flexible_voice_task_commands(monkeypatch):
     res5 = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
     assert res5.json()["status"] == "action_completed"
     assert res5.json()["action"]["tool"] == "create_task"
-    assert res5.json()["action"]["result"]["title"] == "finish embedded systems lab"
+    assert res5.json()["action"]["result"]["title"] == "Finish embedded systems lab"

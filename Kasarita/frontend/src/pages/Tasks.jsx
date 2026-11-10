@@ -1,10 +1,11 @@
 import React, { useState, useMemo } from 'react'
 import { useApp } from '../context/store.jsx'
 import {
-  Plus, Search, Filter, CheckCircle2, Circle, Trash2,
+  Plus, Search, Filter, Check, Trash2,
   Clock, AlertTriangle, ChevronDown, ListTodo, BookOpen,
   Code, Database, Wifi, FlaskConical, Pencil
 } from 'lucide-react'
+import { DEFAULT_SUBJECT_NAMES } from '../subjectConfig.js'
 
 const PRIORITY_ORDER = { High: 0, Medium: 1, Low: 2, Normal: 3 }
 const STATUS_ORDER = { 'In progress': 0, 'To do': 1, Done: 2 }
@@ -18,7 +19,6 @@ const CATEGORY_ICONS = {
   General: <ListTodo size={14} />
 }
 
-const CATEGORIES = ['All', 'Coding', 'Study', 'Database', 'Networking', 'Lab', 'General']
 const STATUSES = ['All', 'To do', 'In progress', 'Done']
 const PRIORITIES = ['All', 'High', 'Medium', 'Low']
 
@@ -30,11 +30,13 @@ function TaskCard({ task, onToggle, onDelete, onEdit }) {
     <div className="task-card">
       <div className="task-card-top">
         <button
+          type="button"
           className={`task-checkbox ${isDone ? 'checked' : ''}`}
           onClick={() => onToggle(task.id)}
           title={isDone ? 'Mark incomplete' : 'Mark complete'}
+          aria-label={isDone ? `Mark ${task.title} incomplete` : `Mark ${task.title} complete`}
         >
-          {isDone ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+          {isDone && <Check size={16} strokeWidth={3} />}
         </button>
 
         <div className="task-card-body">
@@ -65,8 +67,8 @@ function TaskCard({ task, onToggle, onDelete, onEdit }) {
             {task.priority || 'Normal'}
           </span>
           <span className="category-tag">
-            {CATEGORY_ICONS[task.category] || CATEGORY_ICONS.General}
-            {task.category || 'General'}
+            {CATEGORY_ICONS[task.subject || task.category] || CATEGORY_ICONS.General}
+            {task.subject || task.category || 'General'}
           </span>
           {task.status === 'In progress' && (
             <span className="status-tag in-progress">In Progress</span>
@@ -89,28 +91,36 @@ function TaskCard({ task, onToggle, onDelete, onEdit }) {
 export default function Tasks() {
   const { userData, toggleTask, deleteTask, openModal } = useApp()
   const [search, setSearch] = useState('')
-  const [filterCategory, setFilterCategory] = useState('All')
+  const [filterSubject, setFilterSubject] = useState('All')
   const [filterStatus, setFilterStatus] = useState('All')
   const [filterPriority, setFilterPriority] = useState('All')
   const [view, setView] = useState('list') // 'list' | 'board'
 
   const allTasks = userData?.tasks || []
+  const configuredSubjects = userData?.gamification?.subjects
+  const subjects = [...new Set([
+    ...(Array.isArray(configuredSubjects) && configuredSubjects.length > 0
+      ? configuredSubjects
+      : DEFAULT_SUBJECT_NAMES),
+    ...allTasks.map((task) => task.subject || task.category).filter(Boolean)
+  ])]
+  const subjectFilters = ['All', ...subjects]
 
   const filtered = useMemo(() => {
     return allTasks
       .filter((t) => {
         const matchSearch = t.title.toLowerCase().includes(search.toLowerCase())
-        const matchCat = filterCategory === 'All' || t.category === filterCategory
+        const matchSubject = filterSubject === 'All' || (t.subject || t.category) === filterSubject
         const matchStatus = filterStatus === 'All' || t.status === filterStatus
         const matchPri = filterPriority === 'All' || t.priority === filterPriority
-        return matchSearch && matchCat && matchStatus && matchPri
+        return matchSearch && matchSubject && matchStatus && matchPri
       })
       .sort((a, b) => {
         const statusDiff = STATUS_ORDER[a.status] - STATUS_ORDER[b.status]
         if (statusDiff !== 0) return statusDiff
         return (PRIORITY_ORDER[a.priority] ?? 99) - (PRIORITY_ORDER[b.priority] ?? 99)
       })
-  }, [allTasks, search, filterCategory, filterStatus, filterPriority])
+  }, [allTasks, search, filterSubject, filterStatus, filterPriority])
 
   const todo = filtered.filter((t) => t.status === 'To do')
   const inProgress = filtered.filter((t) => t.status === 'In progress')
@@ -167,11 +177,11 @@ export default function Tasks() {
             />
           </div>
 
-          {/* Category filter */}
+          {/* Subject filter */}
           <div className="filter-select-wrap">
             <Filter size={14} />
-            <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)} className="filter-select" id="filter-category">
-              {CATEGORIES.map((c) => <option key={c} value={c}>{c === 'All' ? 'All Categories' : c}</option>)}
+            <select value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)} className="filter-select" id="filter-subject">
+              {subjectFilters.map((subject) => <option key={subject} value={subject}>{subject === 'All' ? 'All Subjects' : subject}</option>)}
             </select>
             <ChevronDown size={14} />
           </div>
@@ -210,11 +220,11 @@ export default function Tasks() {
           <ListTodo size={48} color="var(--text-muted)" style={{ margin: '0 auto 1rem', display: 'block' }} />
           <h3 style={{ color: 'var(--text-muted)', marginBottom: '0.5rem' }}>No tasks found</h3>
           <p style={{ color: 'var(--text-dim)', fontSize: '0.9rem' }}>
-            {search || filterCategory !== 'All' || filterStatus !== 'All' || filterPriority !== 'All'
+            {search || filterSubject !== 'All' || filterStatus !== 'All' || filterPriority !== 'All'
               ? 'Try adjusting your filters.'
               : 'Create your first task or ask Kasarita via voice!'}
           </p>
-          {!search && filterCategory === 'All' && (
+          {!search && filterSubject === 'All' && (
             <button className="btn btn-primary" style={{ marginTop: '1.5rem' }} onClick={() => openModal('task')}>
               <Plus size={16} /> Create First Task
             </button>

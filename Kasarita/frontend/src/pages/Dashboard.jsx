@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { useApp } from '../context/store.jsx'
-import { Sparkles, Check, CheckCircle2, Circle, Flame, Timer, ArrowRight, Trophy, BookOpen, ChevronLeft, ChevronRight, Lightbulb, Bell, Trash2 } from 'lucide-react'
+import { Sparkles, Check, CheckCircle2, Flame, Timer, ArrowRight, Trophy, BookOpen, ChevronLeft, ChevronRight, Lightbulb, Bell, Trash2 } from 'lucide-react'
 import { fmtDate } from '../utils.js'
+import { getLevelTitle } from '../levelTitles.js'
 
 const CS_FACTS = [
   { emoji: '🧮', fact: 'The first computer bug was an actual bug — a moth found trapped in a relay of the Harvard Mark II computer in 1947 by Grace Hopper.' },
@@ -106,7 +107,7 @@ export default function Dashboard() {
           <div className="xp-details">
             <div className="xp-header">
               <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-main)' }}>
-                <Trophy size={16} color="var(--accent-amber)" /> Level {level} Scholar
+                <Trophy size={16} color="var(--accent-amber)" /> Level {level} · {getLevelTitle(level)}
               </span>
               <span style={{ color: 'var(--accent-pink)' }}>{currentLevelXp} / {xpToNextLevel} XP</span>
             </div>
@@ -167,13 +168,17 @@ export default function Dashboard() {
             todayTasks.slice(0, 4).map((task) => (
               <div key={task.id} className="task-item">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <div className="task-checkbox" onClick={() => toggleTask(task.id)}>
-                    <Circle size={16} />
-                  </div>
+                  <button
+                    type="button"
+                    className="task-checkbox"
+                    onClick={() => toggleTask(task.id)}
+                    aria-label={`Mark ${task.title} complete`}
+                  >
+                  </button>
                   <div>
                     <div style={{ fontWeight: '600', fontSize: '0.95rem' }}>{task.title}</div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                      {task.category} • {task.due ? `Due ${task.due}` : 'No deadline'}
+                      {task.subject || task.category || 'General'} • {task.due ? `Due ${task.due}` : 'No deadline'}
                     </div>
                   </div>
                 </div>
@@ -225,7 +230,7 @@ export default function Dashboard() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                   <div className={`task-checkbox ${quest.completed ? 'checked' : ''}`}>
-                    {quest.completed ? <CheckCircle2 size={16} /> : <Circle size={16} />}
+                    {quest.completed && <Check size={16} strokeWidth={3} />}
                   </div>
                   <span style={{ fontWeight: '600', fontSize: '0.9rem' }}>
                     {quest.title}

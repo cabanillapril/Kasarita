@@ -353,13 +353,14 @@ main.main-content {
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  background: var(--gradient-streak);
+  background: var(--gradient-xp);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
   color: white;
   font-size: 0.9rem;
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);
 }
 
 .user-info {
@@ -370,6 +371,7 @@ main.main-content {
 .user-name {
   font-size: 0.9rem;
   font-weight: 600;
+  color: #c4b5fd;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -377,7 +379,7 @@ main.main-content {
 
 .user-level-tag {
   font-size: 0.75rem;
-  color: var(--accent-amber);
+  color: #a78bfa;
   font-weight: 600;
 }
 
@@ -641,9 +643,12 @@ main.main-content {
 .task-checkbox {
   width: 22px;
   height: 22px;
-  border-radius: 6px;
+  padding: 0;
+  border-radius: 50%;
   border: 2px solid var(--text-muted);
+  background: transparent;
   display: flex;
+  flex: 0 0 22px;
   align-items: center;
   justify-content: center;
   cursor: pointer;
@@ -1435,6 +1440,152 @@ main.main-content {
   text-align: center;
   color: var(--text-muted);
   padding: 2rem;
+}
+
+.stat-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1.25rem;
+}
+
+.stat-card {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 158px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 1.4rem 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-lg);
+  border-top: 3px solid var(--stat-accent, var(--accent-indigo));
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.22);
+}
+
+.stat-card-indigo { --stat-accent: var(--accent-indigo); }
+.stat-card-emerald { --stat-accent: var(--accent-emerald); }
+.stat-card-violet { --stat-accent: var(--accent-violet); }
+.stat-card-amber { --stat-accent: var(--accent-amber); }
+
+.stat-label {
+  order: 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.stat-num {
+  order: 1;
+  color: var(--text-main);
+  font-size: clamp(1.8rem, 2.4vw, 2.25rem);
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.stat-detail {
+  order: 2;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.analytics-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.grid-dash {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 1.5rem;
+}
+
+.analytics-chart-card {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 420px;
+  padding: 1.5rem;
+}
+
+.analytics-chart-heading {
+  min-height: 66px;
+  margin-bottom: 0.75rem;
+}
+
+.analytics-chart-heading h2 {
+  margin: 0;
+  color: var(--text-main);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.analytics-chart-heading p {
+  margin: 0.35rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.analytics-chart {
+  width: 100%;
+  min-width: 0;
+  height: 300px;
+}
+
+.analytics-empty {
+  min-height: 300px;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 1rem;
+}
+
+@media (max-width: 1100px) {
+  .stat-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .grid-dash {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .analytics-chart-card {
+    min-height: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .stat-row {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .stat-card {
+    min-height: 132px;
+    padding: 1.15rem 1.25rem;
+  }
+
+  .analytics-page {
+    gap: 1.1rem;
+  }
+
+  .analytics-chart-card {
+    padding: 1.15rem;
+  }
+
+  .analytics-chart {
+    height: 270px;
+  }
 }
 
 /* =============================================

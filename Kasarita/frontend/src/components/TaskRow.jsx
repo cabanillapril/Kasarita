@@ -8,14 +8,19 @@ export default function TaskRow({ task }) {
   const done = task.status === 'Done'
   return (
     <div className={`task-row p-${task.priority}${done ? ' done' : ''}`}>
-      <button className={`task-check${done ? ' checked' : ''}`} onClick={() => toggleTask(task.id)} aria-label="Toggle complete">
+      <button
+        type="button"
+        className={`task-checkbox task-check${done ? ' checked' : ''}`}
+        onClick={() => toggleTask(task.id)}
+        aria-label={done ? `Mark ${task.title} incomplete` : `Mark ${task.title} complete`}
+      >
         {done && <Check size={13} strokeWidth={3} />}
       </button>
       <div className="task-main">
         <div className="task-title">{task.title}</div>
         <div className="task-meta">
           <span className="badge">{task.priority}</span>
-          <span className="badge">{task.category || 'General'}</span>
+          <span className="badge">{task.subject || task.category || 'General'}</span>
           <span>{task.due ? `Due ${fmtDate(task.due)}` : 'No due date'}</span>
         </div>
       </div>

@@ -1,11 +1,20 @@
 import React, { useState } from 'react'
 import { useApp } from '../context/store.jsx'
+import { DEFAULT_SUBJECT_NAMES } from '../subjectConfig.js'
+import { cap } from '../utils.js'
 
 export default function TaskForm({ existing, onDone }) {
-  const { addTask, updateTask } = useApp()
+  const { addTask, updateTask, userData } = useApp()
   const isEdit = !!existing
   const [title, setTitle] = useState(existing?.title || '')
-  const [category, setCategory] = useState(existing?.category || 'Academics')
+  const configuredSubjects = Array.isArray(userData?.gamification?.subjects) && userData.gamification.subjects.length > 0
+    ? userData.gamification.subjects
+    : DEFAULT_SUBJECT_NAMES
+  const existingSubject = existing?.subject || existing?.category
+  const subjects = existingSubject && !configuredSubjects.includes(existingSubject)
+    ? [...configuredSubjects, existingSubject]
+    : configuredSubjects
+  const [subject, setSubject] = useState(existingSubject || subjects[0])
   const [priority, setPriority] = useState(existing?.priority || 'Medium')
   const [status, setStatus] = useState(existing?.status || 'To do')
   const [due, setDue] = useState(existing?.due || '')
@@ -14,7 +23,7 @@ export default function TaskForm({ existing, onDone }) {
   function submit(e) {
     e.preventDefault()
     if (!title.trim()) return
-    const fields = { title: title.trim(), category: category.trim() || 'General', priority, status, due: due || null, notes: notes.trim() }
+    const fields = { title: cap(title.trim()), subject, priority, status, due: due || null, notes: notes.trim() }
     if (isEdit) updateTask(existing.id, fields)
     else addTask(fields)
     onDone()
@@ -28,8 +37,10 @@ export default function TaskForm({ existing, onDone }) {
       </label>
       <div className="field-row">
         <div className="field">
-          <label>Category</label>
-          <input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Academics" />
+          <label>Subject</label>
+          <select value={subject} onChange={(e) => setSubject(e.target.value)} required>
+            {subjects.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
         </div>
         <div className="field">
           <label>Priority</label>

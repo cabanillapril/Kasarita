@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { uid, todayISO, fmtDate, cap, parseLooseDate, speak } from '../utils.js'
+import { DEFAULT_SUBJECT_NAMES } from '../subjectConfig.js'
 
 const STORAGE_KEY = 'kasarita_state_v3'
 const THEME_STORAGE_KEY = 'kasarita_theme'
@@ -26,7 +27,7 @@ function fromApiTask(task) {
   return {
     id: task.id,
     title: task.title,
-    category: task.category || 'General',
+    subject: task.subject || task.category || 'General',
     priority: cap(task.priority || 'normal'),
     status: task.status === 'completed' ? 'Done' : 'To do',
     due: task.due_date || null,
@@ -37,9 +38,9 @@ function fromApiTask(task) {
 
 function sampleTasks() {
   return [
-    { id: uid(), title: 'Finish CS elective proposal', category: 'Coding', priority: 'High', status: 'In progress', due: todayISO(), notes: '' },
-    { id: uid(), title: 'Read Chapter 4 Embedded Systems notes', category: 'Study', priority: 'Medium', status: 'To do', due: null, notes: '' },
-    { id: uid(), title: 'Submit SQL Database lab report', category: 'Database', priority: 'Low', status: 'Done', due: todayISO(), notes: '' }
+    { id: uid(), title: 'Finish CS elective proposal', subject: 'Coding', priority: 'High', status: 'In progress', due: todayISO(), notes: '' },
+    { id: uid(), title: 'Read Chapter 4 Embedded Systems notes', subject: 'Study', priority: 'Medium', status: 'To do', due: null, notes: '' },
+    { id: uid(), title: 'Submit SQL Database lab report', subject: 'Database', priority: 'Low', status: 'Done', due: todayISO(), notes: '' }
   ]
 }
 
@@ -70,6 +71,7 @@ function defaultUserData() {
       lastStudyDate: todayISO(),
       achievements: INITIAL_ACHIEVEMENTS,
       quests: INITIAL_QUESTS,
+      subjects: [...DEFAULT_SUBJECT_NAMES],
       subjectTime: { Coding: 360, Database: 240, Networking: 180, Math: 120 }
     }
   }
@@ -118,6 +120,7 @@ export function AppProvider({ children }) {
   const [toast, setToast] = useState('')
   const toastTimer = useRef(null)
   const wsRef = useRef(null)
+  const pendingWebMessagesRef = useRef(new Map())
 
   // Active Study Session Timer State
   const [studyTimer, setStudyTimer] = useState({
@@ -312,6 +315,31 @@ export function AppProvider({ children }) {
     return msg
   }
 
+  function markPendingWebMessage(text) {
+    const pending = pendingWebMessagesRef.current
+    const entries = pending.get(text) || []
+    const entry = { timer: null }
+    entry.timer = setTimeout(() => {
+      const currentEntries = pending.get(text) || []
+      const remaining = currentEntries.filter((item) => item !== entry)
+      if (remaining.length) pending.set(text, remaining)
+      else pending.delete(text)
+    }, 60000)
+    pending.set(text, [...entries, entry])
+  }
+
+  function consumePendingWebMessage(text) {
+    const pending = pendingWebMessagesRef.current
+    const entries = pending.get(text)
+    if (!entries?.length) return false
+
+    const [entry, ...remaining] = entries
+    clearTimeout(entry.timer)
+    if (remaining.length) pending.set(text, remaining)
+    else pending.delete(text)
+    return true
+  }
+
   // Real-time WebSocket connection to backend
   useEffect(() => {
     let reconnectTimer = null
@@ -330,7 +358,8 @@ export function AppProvider({ children }) {
 
             // Record transcript as user msg + reply as assistant msg
             if (payload.transcript) {
-              addMessage('user', payload.transcript, source)
+              const isOwnWebMessage = source === 'web' && consumePendingWebMessage(payload.transcript)
+              if (!isOwnWebMessage) addMessage('user', payload.transcript, source)
             }
             if (payload.reply) {
               addMessage('assistant', payload.reply, source)
@@ -418,18 +447,42 @@ export function AppProvider({ children }) {
     addMessage('assistant', `Awesome job! You completed a ${minutes}-minute ${subject} study session and earned XP!`, 'web')
   }
 
+  function updateSubjects(subjects, renamedSubjects = {}) {
+    const normalizedSubjects = subjects.map((subject) => subject.trim()).filter(Boolean)
+    const uniqueSubjects = new Set(normalizedSubjects.map((subject) => subject.toLocaleLowerCase()))
+    const user = currentUserRef.current
+    if (!user || uniqueSubjects.size !== normalizedSubjects.length || normalizedSubjects.length === 0) {
+      return false
+    }
+
+    mutateUserData(user.id, (d) => {
+      const subjectTime = { ...(d.gamification.subjectTime || {}) }
+      Object.entries(renamedSubjects).forEach(([oldName, newName]) => {
+        if (oldName === newName || !Object.prototype.hasOwnProperty.call(subjectTime, oldName)) return
+        subjectTime[newName] = (subjectTime[newName] || 0) + subjectTime[oldName]
+        delete subjectTime[oldName]
+      })
+      d.gamification.subjects = normalizedSubjects
+      d.gamification.subjectTime = subjectTime
+      return d
+    })
+    return true
+  }
+
   function addTask(task) {
     if (!currentUser) return
     const localId = uid()
+    const normalizedTask = { ...task, title: cap(task.title.trim()) }
     fetch(`${API_BASE}/tasks`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         arguments: {
-          title: task.title,
-          due_date: task.due || null,
-          priority: (task.priority || 'Medium').toLowerCase(),
-          status: task.status === 'Done' ? 'completed' : 'pending'
+          title: normalizedTask.title,
+          subject: normalizedTask.subject || normalizedTask.category || 'General',
+          due_date: normalizedTask.due || null,
+          priority: (normalizedTask.priority || 'Medium').toLowerCase(),
+          status: normalizedTask.status === 'Done' ? 'completed' : 'pending'
         }
       })
     })
@@ -440,15 +493,44 @@ export function AppProvider({ children }) {
             ...d,
             tasks: [fromApiTask(payload.task), ...d.tasks.filter((item) => item.id !== localId)]
           }))
-        }
-      })
-      .catch(() => {})
+      } else {
+        showToast('Task saved locally, but could not sync. Update the backend task schema and try again.')
+      }
+    })
+    .catch((error) => {
+      console.warn('Kasarita: could not sync task creation.', error)
+      showToast('Task saved locally, but could not sync with the backend.')
+    })
 
     mutateUserData(currentUser.id, (d) => {
-      d.tasks = [{ id: localId, completedOn: task.status === 'Done' ? todayISO() : undefined, ...task }, ...d.tasks]
+      d.tasks = [{ id: localId, completedOn: normalizedTask.status === 'Done' ? todayISO() : undefined, ...normalizedTask }, ...d.tasks]
       return d
     })
-    showToast(`Task created: "${task.title}"`)
+    showToast(`Task created: "${normalizedTask.title}"`)
+  }
+
+  function updateTask(id, task) {
+    if (!currentUser) return
+    const updatedTask = { ...task, title: cap(task.title.trim()), subject: task.subject || task.category || 'General' }
+    fetch(`${API_BASE}/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        arguments: {
+          title: updatedTask.title,
+          subject: updatedTask.subject,
+          due_date: updatedTask.due,
+          priority: (updatedTask.priority || 'Medium').toLowerCase(),
+          status: updatedTask.status === 'Done' ? 'completed' : 'pending'
+        }
+      })
+    }).catch((error) => console.warn('Kasarita: could not sync task changes.', error))
+
+    mutateUserData(currentUser.id, (d) => ({
+      ...d,
+      tasks: d.tasks.map((item) => item.id === id ? { ...item, ...updatedTask } : item)
+    }))
+    showToast(`Task updated: "${updatedTask.title}"`)
   }
 
   function toggleTask(id) {
@@ -491,18 +573,20 @@ export function AppProvider({ children }) {
   }
 
   function sendWebChatMessage(text) {
-    if (!text.trim() || !currentUser) return
-    addMessage('user', text, 'web')
+    const message = text.trim()
+    if (!message || !currentUser) return
+    addMessage('user', message, 'web')
 
     // Send via WebSocket for a real AI reply with session memory
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ text, source: 'web', session_id: currentUser.id }))
+      markPendingWebMessage(message)
+      wsRef.current.send(JSON.stringify({ text: message, source: 'web', session_id: currentUser.id }))
     } else {
       // Fallback: use HTTP /chat endpoint if WS is down
       fetch(`${API_BASE}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, session_id: currentUser.id })
+        body: JSON.stringify({ text: message, session_id: currentUser.id })
       })
         .then((res) => res.json())
         .then((data) => {
@@ -593,8 +677,10 @@ export function AppProvider({ children }) {
     pauseStudySession,
     resumeStudySession,
     completeStudySession,
+    updateSubjects,
     awardXp,
     addTask,
+    updateTask,
     toggleTask,
     deleteTask,
     sendWebChatMessage,

@@ -1,19 +1,10 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useApp } from '../context/store.jsx'
 import {
-  Timer, Play, Pause, RotateCcw, BookOpen, Code,
-  Database, Wifi, FlaskConical, CheckCircle2, Zap,
+  Timer, Play, Pause, RotateCcw, CheckCircle2, Zap,
   Coffee, Brain, Target, TrendingUp
 } from 'lucide-react'
-
-const SUBJECTS = [
-  { name: 'Coding', icon: <Code size={18} />, color: 'var(--accent-violet)', gradient: 'var(--gradient-xp)' },
-  { name: 'Study', icon: <BookOpen size={18} />, color: 'var(--accent-emerald)', gradient: 'var(--gradient-study)' },
-  { name: 'Database', icon: <Database size={18} />, color: 'var(--accent-cyan)', gradient: 'linear-gradient(135deg, #06b6d4, #0ea5e9)' },
-  { name: 'Networking', icon: <Wifi size={18} />, color: 'var(--accent-amber)', gradient: 'var(--gradient-streak)' },
-  { name: 'Math', icon: <Brain size={18} />, color: 'var(--accent-pink)', gradient: 'linear-gradient(135deg, #ec4899, #f43f5e)' },
-  { name: 'Lab', icon: <FlaskConical size={18} />, color: '#a78bfa', gradient: 'linear-gradient(135deg, #a78bfa, #8b5cf6)' }
-]
+import { DEFAULT_SUBJECT_NAMES, getSubjectColors } from '../subjectConfig.js'
 
 const DURATIONS = [
   { label: '10 min', minutes: 10, desc: 'Rest & Review' },
@@ -35,8 +26,7 @@ function fmt(secs) {
   return `${m}:${s}`
 }
 
-function CircleTimer({ secondsLeft, totalSeconds, subject, durationMinutes }) {
-  const subjectInfo = SUBJECTS.find((s) => s.name === subject) || SUBJECTS[0]
+function CircleTimer({ secondsLeft, totalSeconds, subject, subjectColor, durationMinutes }) {
   const durationInfo = DURATIONS.find((duration) => duration.minutes === durationMinutes)
   const pct = totalSeconds > 0 ? secondsLeft / totalSeconds : 1
   const radius = 100
@@ -52,7 +42,7 @@ function CircleTimer({ secondsLeft, totalSeconds, subject, durationMinutes }) {
         <circle
           cx="120" cy="120" r={radius}
           fill="none"
-          stroke="url(#timerGrad)"
+          stroke={subjectColor}
           strokeWidth="12"
           strokeLinecap="round"
           strokeDasharray={circumference}
@@ -60,16 +50,10 @@ function CircleTimer({ secondsLeft, totalSeconds, subject, durationMinutes }) {
           transform="rotate(-90 120 120)"
           style={{ transition: 'stroke-dashoffset 0.8s ease-out' }}
         />
-        <defs>
-          <linearGradient id="timerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#10b981" />
-            <stop offset="100%" stopColor="#06b6d4" />
-          </linearGradient>
-        </defs>
       </svg>
       <div className="timer-ring-center">
-        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '0.25rem' }}>
-          {subjectInfo.icon} {subject}
+        <div style={{ fontSize: '0.8rem', color: subjectColor, marginBottom: '0.25rem', fontWeight: '600' }}>
+          {subject}
         </div>
         <div className="timer-digits">{fmt(secondsLeft)}</div>
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
@@ -86,14 +70,28 @@ function CircleTimer({ secondsLeft, totalSeconds, subject, durationMinutes }) {
 export default function Study() {
   const { studyTimer, startStudySession, pauseStudySession, resumeStudySession, userData, setRoute } = useApp()
 
-  const [selectedSubject, setSelectedSubject] = useState('Coding')
+  const savedSubjects = userData?.gamification?.subjects
+  const configuredSubjects = Array.isArray(savedSubjects) && savedSubjects.length > 0
+    ? savedSubjects
+    : DEFAULT_SUBJECT_NAMES
+  const subjectColors = getSubjectColors(configuredSubjects)
+  const subjects = configuredSubjects.map((name) => ({ name, ...subjectColors[name] }))
+
+  const [selectedSubject, setSelectedSubject] = useState(configuredSubjects[0])
   const [selectedDuration, setSelectedDuration] = useState(25)
+
+  useEffect(() => {
+    if (!configuredSubjects.includes(selectedSubject)) {
+      setSelectedSubject(configuredSubjects[0])
+    }
+  }, [configuredSubjects.join('\u0000'), selectedSubject])
 
   const isIdle = !studyTimer.isRunning && studyTimer.secondsLeft === studyTimer.durationMinutes * 60
   const isFinished = !studyTimer.isRunning && studyTimer.secondsLeft === 0
 
   const subjectTime = userData?.gamification?.subjectTime || {}
   const totalMinutes = Object.values(subjectTime).reduce((a, b) => a + b, 0)
+  const activeSubject = subjects.find((subject) => subject.name === (isIdle ? selectedSubject : studyTimer.subject)) || subjects[0]
 
   function handleStart() {
     startStudySession(selectedSubject, selectedDuration)
@@ -157,6 +155,7 @@ export default function Study() {
             secondsLeft={isIdle ? selectedDuration * 60 : studyTimer.secondsLeft}
             totalSeconds={(isIdle ? selectedDuration : studyTimer.durationMinutes) * 60}
             subject={isIdle ? selectedSubject : studyTimer.subject || selectedSubject}
+            subjectColor={activeSubject.color}
             durationMinutes={isIdle ? selectedDuration : studyTimer.durationMinutes}
           />
 
@@ -226,15 +225,16 @@ export default function Study() {
           <div className="glass-card">
             <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Choose Subject</h3>
             <div className="subject-grid">
-              {SUBJECTS.map((sub) => (
+              {subjects.map((sub) => (
                 <button
                   key={sub.name}
                   id={`subject-${sub.name.toLowerCase()}`}
                   className={`subject-btn ${selectedSubject === sub.name ? 'active' : ''}`}
-                  style={selectedSubject === sub.name ? { background: sub.gradient, borderColor: 'transparent' } : {}}
+                  style={selectedSubject === sub.name
+                    ? { background: sub.gradient, borderColor: 'transparent', color: 'white' }
+                    : { borderColor: sub.color, color: sub.color }}
                   onClick={() => setSelectedSubject(sub.name)}
                 >
-                  {sub.icon}
                   <span>{sub.name}</span>
                 </button>
               ))}
@@ -284,13 +284,13 @@ export default function Study() {
       <div className="glass-card">
         <h3 style={{ marginBottom: '1.25rem' }}>Time Per Subject</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-          {SUBJECTS.map((sub) => {
+          {subjects.map((sub) => {
             const mins = subjectTime[sub.name] || 0
             const pct = totalMinutes > 0 ? (mins / totalMinutes) * 100 : 0
             return (
               <div key={sub.name} style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <div style={{ width: '100px', display: 'flex', alignItems: 'center', gap: '0.4rem', color: sub.color, fontSize: '0.85rem', fontWeight: '600', flexShrink: 0 }}>
-                  {sub.icon} {sub.name}
+                  {sub.name}
                 </div>
                 <div className="xp-progress-bar" style={{ flex: 1, height: '8px' }}>
                   <div className="xp-progress-fill" style={{ width: `${pct}%`, background: sub.gradient }} />

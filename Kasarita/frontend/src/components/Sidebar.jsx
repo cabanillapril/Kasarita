@@ -1,5 +1,5 @@
 import React from 'react'
-import { LayoutDashboard, MessageSquare, CheckSquare, Timer, Award, Settings, LogOut, Bot, X } from 'lucide-react'
+import { LayoutDashboard, MessageSquare, CheckSquare, Timer, Award, BarChart3, Settings, LogOut, Bot, X } from 'lucide-react'
 import { useApp } from '../context/store.jsx'
 
 const NAV = [
@@ -8,6 +8,7 @@ const NAV = [
   { key: 'tasks', label: 'Tasks', icon: CheckSquare },
   { key: 'study', label: 'Study Focus', icon: Timer },
   { key: 'progress', label: 'Progress', icon: Award },
+  { key: 'analytics', label: 'Analytics', icon: BarChart3 },
   { key: 'settings', label: 'Settings', icon: Settings }
 ]
 
@@ -61,7 +62,7 @@ export default function Sidebar({ open, onClose }) {
         ))}
       </nav>
 
-      {/* Streak Badge */}
+      {/* Streak Badge
       <div className="glass-card streak-card" style={{ padding: '0.85rem 1rem', marginBottom: '1rem', marginTop: '1rem' }}>
         <span className="flame-icon">🔥</span>
         <div>
@@ -70,7 +71,7 @@ export default function Sidebar({ open, onClose }) {
           </div>
           <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Keep studying daily</div>
         </div>
-      </div>
+      </div> */}
 
       {/* User Info */}
       <div className="sidebar-user">

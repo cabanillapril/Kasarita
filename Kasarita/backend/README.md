@@ -29,8 +29,7 @@ The backend exposes `POST /tts` with `{"text":"Hello"}` and responds with mono, 
 
 To use Supabase instead of SQLite, set `SUPABASE_URL` and `SUPABASE_KEY` in `.env`, then run `supabase_schema.sql` in the Supabase SQL editor. When both values are present, MCP tools use Supabase automatically.
 
-If Supabase was configured before reminder completion was added, run the updated `supabase_schema.sql` again to add the reminder `status` column.
-Reminder creation remains compatible with an older reminders table that lacks `status`; completion and deletion still require the updated schema.
+Run the updated `supabase_schema.sql` to add the task `subject` column and reminder `status` column. Reminder creation remains compatible with an older reminders table that lacks `status`; completion and deletion still require the updated schema.
 
 - GET /health
 - POST /chat

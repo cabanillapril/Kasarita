@@ -1,31 +1,10 @@
 import React from 'react'
 import { useApp } from '../context/store.jsx'
 import {
-  Trophy, Zap, Flame, BookOpen, Code, Database,
-  Wifi, Brain, Star, TrendingUp, Award, BarChart3
+  Trophy, Zap, Flame, Star, TrendingUp, Award, BarChart3
 } from 'lucide-react'
-
-const SUBJECT_META = {
-  Coding: { icon: <Code size={16} />, color: '#8b5cf6', gradient: 'linear-gradient(135deg, #6366f1, #8b5cf6)' },
-  Study: { icon: <BookOpen size={16} />, color: '#10b981', gradient: 'linear-gradient(135deg, #10b981, #06b6d4)' },
-  Database: { icon: <Database size={16} />, color: '#06b6d4', gradient: 'linear-gradient(135deg, #06b6d4, #0ea5e9)' },
-  Networking: { icon: <Wifi size={16} />, color: '#f59e0b', gradient: 'linear-gradient(135deg, #ef4444, #f59e0b)' },
-  Math: { icon: <Brain size={16} />, color: '#ec4899', gradient: 'linear-gradient(135deg, #ec4899, #f43f5e)' },
-  Lab: { icon: '🧪', color: '#a78bfa', gradient: 'linear-gradient(135deg, #a78bfa, #8b5cf6)' }
-}
-
-const LEVEL_TITLES = {
-  1: 'Freshman Learner',
-  2: 'Knowledge Seeker',
-  3: 'Study Adept',
-  4: 'Academic Explorer',
-  5: 'Scholar Rising',
-  6: 'Focus Master',
-  7: 'Deep Thinker',
-  8: 'Elite Scholar',
-  9: 'Wisdom Seeker',
-  10: 'Legend Student'
-}
+import { getLevelTitle, XP_MILESTONES } from '../levelTitles.js'
+import { DEFAULT_SUBJECT_NAMES, getSubjectColors } from '../subjectConfig.js'
 
 function AchievementCard({ ach }) {
   return (
@@ -76,12 +55,19 @@ export default function Progress() {
   const quests = gamification.quests || []
   const subjectTime = gamification.subjectTime || {}
   const streak = gamification.streak || 0
+  const configuredSubjects = Array.isArray(gamification.subjects) && gamification.subjects.length > 0
+    ? gamification.subjects
+    : DEFAULT_SUBJECT_NAMES
+  const historicalSubjects = Object.keys(subjectTime)
+    .filter((subject) => !configuredSubjects.includes(subject))
+    .sort((a, b) => a.localeCompare(b))
+  const subjectColors = getSubjectColors([...configuredSubjects, ...historicalSubjects])
 
   const totalMinutes = Object.values(subjectTime).reduce((a, b) => a + b, 0)
   const unlockedCount = achievements.filter((a) => a.unlocked).length
   const questsDone = quests.filter((q) => q.completed).length
 
-  const levelTitle = LEVEL_TITLES[Math.min(level, 10)] || 'Legend'
+  const levelTitle = getLevelTitle(level)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -119,7 +105,7 @@ export default function Progress() {
           <div style={{ display: 'flex', gap: '2rem', marginTop: '1rem' }}>
             <div>
               <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-amber)' }}>{streak}</div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Day Streak 🔥</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Day Streak</div>
             </div>
             <div>
               <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-emerald)' }}>{unlockedCount}</div>
@@ -166,13 +152,13 @@ export default function Progress() {
               {Object.entries(subjectTime)
                 .sort(([, a], [, b]) => b - a)
                 .map(([subject, mins]) => {
-                  const meta = SUBJECT_META[subject] || SUBJECT_META.Study
+                  const meta = subjectColors[subject] || { color: 'var(--accent-violet)', gradient: 'var(--gradient-xp)' }
                   const pct = totalMinutes > 0 ? (mins / totalMinutes) * 100 : 0
                   return (
                     <div key={subject}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.35rem', fontSize: '0.85rem' }}>
                         <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: meta.color, fontWeight: '600' }}>
-                          {typeof meta.icon === 'string' ? meta.icon : meta.icon} {subject}
+                          {subject}
                         </span>
                         <span style={{ color: 'var(--text-muted)' }}>{mins}m · {Math.round(pct)}%</span>
                       </div>
@@ -192,11 +178,15 @@ export default function Progress() {
               XP Milestones
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-              <XpMilestone label="🌱 Newcomer" xp={250} current={Math.min(xp, 250)} color="#10b981" />
-              <XpMilestone label="📚 Scholar" xp={750} current={Math.min(xp, 750)} color="#6366f1" />
-              <XpMilestone label="⚡ Expert" xp={1500} current={Math.min(xp, 1500)} color="#8b5cf6" />
-              <XpMilestone label="🏆 Master" xp={3000} current={Math.min(xp, 3000)} color="#f59e0b" />
-              <XpMilestone label="🌟 Legend" xp={5000} current={Math.min(xp, 5000)} color="#ec4899" />
+              {XP_MILESTONES.map((milestone) => (
+                <XpMilestone
+                  key={milestone.label}
+                  label={milestone.label}
+                  xp={milestone.xp}
+                  current={Math.min(xp, milestone.xp)}
+                  color={milestone.color}
+                />
+              ))}
             </div>
           </div>
 

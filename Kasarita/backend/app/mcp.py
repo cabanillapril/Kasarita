@@ -51,6 +51,7 @@ def initialize_database() -> None:
             CREATE TABLE IF NOT EXISTS tasks (
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
+                subject TEXT NOT NULL DEFAULT 'General',
                 due_date TEXT,
                 priority TEXT NOT NULL,
                 status TEXT NOT NULL,
@@ -72,6 +73,13 @@ def initialize_database() -> None:
             );
             """
         )
+        task_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(tasks)").fetchall()
+        }
+        if "subject" not in task_columns:
+            connection.execute(
+                "ALTER TABLE tasks ADD COLUMN subject TEXT NOT NULL DEFAULT 'General'"
+            )
         reminder_columns = {
             row["name"] for row in connection.execute("PRAGMA table_info(reminders)").fetchall()
         }
@@ -203,6 +211,7 @@ OPENAI_TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "The title or description of the task to create."},
+                    "subject": {"type": "string", "description": "The subject associated with this task."},
                     "due_date": {"type": "string", "description": "Optional due date; accepts calendar dates, weekdays, today, and tomorrow."},
                     "priority": {"type": "string", "enum": ["low", "normal", "high"], "description": "Task priority level."}
                 },
@@ -461,22 +470,59 @@ def format_calendar_date(value: Optional[str]) -> Optional[str]:
         return value
 
 
-def create_task(title: str, due_date: Optional[str] = None, priority: str = "normal") -> dict[str, Any]:
+def _clean_item_title(title: str) -> str:
+    title = re.sub(r"^about\s+my\s+", "", title.strip(), flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", title).strip(" .,;:!?")
+
+
+def create_task(
+    title: str,
+    due_date: Optional[str] = None,
+    priority: str = "normal",
+    subject: str = "General",
+) -> dict[str, Any]:
     title, extracted_date = extract_calendar_date(title)
+    title = _clean_item_title(title)
+    if title:
+        title = title[0].upper() + title[1:]
     task = {
         "id": str(uuid4()),
         "title": title,
+        "subject": subject,
         "due_date": _normalize_date_value(due_date) if due_date is not None else extracted_date,
         "priority": priority,
         "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     if use_supabase():
-        return supabase_request("POST", "tasks", json=task)[0]
+        try:
+            result = supabase_request("POST", "tasks", json=task)
+        except ValueError as error:
+            detail = str(error).lower()
+            missing_subject_column = (
+                "subject" in detail
+                and ("column" in detail or "schema cache" in detail)
+            )
+            if not missing_subject_column:
+                raise
+            if subject != "General":
+                raise ValueError(
+                    "The Supabase tasks table does not have a subject column. "
+                    "Run backend/supabase_schema.sql before saving custom task subjects."
+                ) from error
+
+            legacy_task = {key: value for key, value in task.items() if key != "subject"}
+            result = supabase_request("POST", "tasks", json=legacy_task)
+            if result:
+                result[0].setdefault("subject", "General")
+                return result[0]
+            legacy_task["subject"] = "General"
+            return legacy_task
+        return result[0]
     initialize_database()
     with connect() as connection:
         connection.execute(
-            "INSERT INTO tasks (id, title, due_date, priority, status, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks (id, title, subject, due_date, priority, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
             tuple(task.values()),
         )
     return task
@@ -509,9 +555,12 @@ def complete_task(task_id: str) -> dict[str, Any]:
 
 def update_task(task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
     task_id = find_task_id(task_id)
-    allowed = {key: value for key, value in fields.items() if key in {"title", "due_date", "priority", "status"}}
+    allowed = {key: value for key, value in fields.items() if key in {"title", "subject", "due_date", "priority", "status"}}
     if "title" in allowed:
         title, extracted_date = extract_calendar_date(str(allowed["title"]))
+        title = _clean_item_title(title)
+        if title:
+            title = title[0].upper() + title[1:]
         allowed["title"] = title
         if "due_date" not in allowed and extracted_date is not None:
             allowed["due_date"] = extracted_date
@@ -547,6 +596,7 @@ def delete_task(task_id: str) -> None:
 
 def create_reminder(title: str, remind_at: Optional[str] = None) -> dict[str, Any]:
     title, extracted_date = extract_calendar_date(title)
+    title = _clean_item_title(title)
     reminder = {
         "id": str(uuid4()),
         "title": title,
@@ -692,20 +742,24 @@ def interpret_command(text: str) -> Optional[tuple[str, dict[str, Any]]]:
         title = re.sub(reminder_pattern, "", cleaned, flags=re.IGNORECASE).strip(".,;:!? ")
         title = re.sub(r"^(?:to|for)\s+", "", title, flags=re.IGNORECASE)
         title, remind_at = extract_calendar_date(title)
+        title = _clean_item_title(title)
         if title:
             return "create_reminder", {"title": title, "remind_at": remind_at}
 
     # Task Creation
     create_pattern = (
-        r"^(can\s+you\s+|could\s+you\s+|please\s+)?"
-        r"(add\s+(a\s+)?task(\s+to)?|create\s+(a\s+)?task(\s+to)?|new\s+task(\s+to)?|"
-        r"remember\s+to|i\s+need\s+to|put\s+on\s+my\s+task\s+list|"
-        r"make\s+a\s+task|schedule\s+task|todo)"
+        r"^(?:(?:can\s+you\s+|could\s+you\s+|please\s+)?"
+        r"(add\s+(a\s+)?tasks?(\s+to)?|create\s+(a\s+)?tasks?(\s+to)?|new\s+tasks?(\s+to)?|"
+        r"set\s+up|remember\s+to|i\s+need\s+to|put\s+on\s+my\s+task\s+list|"
+        r"make\s+a\s+task|schedule\s+tasks?|todo)|i(?:['’]ve| have)\s+set\s+up)"
         r"[,:\-\s]+\s*"
     )
     if re.search(create_pattern, normalized):
         title = re.sub(create_pattern, "", cleaned, flags=re.IGNORECASE).strip(".,;:!? ")
+        title = re.sub(r"^(?:a|the)\s+", "", title, flags=re.IGNORECASE)
+        title = re.sub(r"^tasks?\s+(?:to\s+)?", "", title, flags=re.IGNORECASE)
         title, due_date = extract_calendar_date(title)
+        title = _clean_item_title(title)
         if title:
             return "create_task", {"title": title, "due_date": due_date}
 

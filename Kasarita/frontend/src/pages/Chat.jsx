@@ -83,7 +83,7 @@ export default function Chat() {
                       }}
                       title="Listen with Text-To-Speech"
                     >
-                      <Volume2 size={14} /> Listen
+                      
                     </button>
                   )}
                 </div>
@@ -99,7 +99,7 @@ export default function Chat() {
           <input
             type="text"
             className="chat-input"
-            placeholder="Talk with Kasarita (e.g. 'What is a binary tree?', 'Add task study SQL')..."
+            placeholder=""
             value={input}
             onChange={(e) => setInput(e.target.value)}
           />
