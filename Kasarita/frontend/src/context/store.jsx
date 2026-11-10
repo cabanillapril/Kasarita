@@ -111,6 +111,8 @@ function loadTheme() {
 export function AppProvider({ children }) {
   const [state, setState] = useState(loadState)
   const [theme, setTheme] = useState(loadTheme)
+  const [reminders, setReminders] = useState([])
+  const [remindersLoadError, setRemindersLoadError] = useState(false)
   const [route, setRoute] = useState('dashboard')
   const [modal, setModal] = useState({ type: null, payload: null })
   const [toast, setToast] = useState('')
@@ -226,8 +228,60 @@ export function AppProvider({ children }) {
       .catch(() => {})
   }
 
+  function reloadReminders() {
+    fetch(`${API_BASE}/reminders`)
+      .then((res) => {
+        if (!res.ok) throw new Error(`Reminder request failed with status ${res.status}`)
+        return res.json()
+      })
+      .then(({ reminders: savedReminders }) => {
+        if (!Array.isArray(savedReminders)) {
+          throw new Error('Reminder response did not contain a reminders list')
+        }
+        setReminders(savedReminders)
+        setRemindersLoadError(false)
+      })
+      .catch((error) => {
+        console.warn('Kasarita: could not load reminders.', error)
+        setRemindersLoadError(true)
+      })
+  }
+
+  async function markReminderDone(reminderId) {
+    try {
+      const response = await fetch(`${API_BASE}/reminders/${reminderId}`, { method: 'PATCH' })
+      const payload = await response.json()
+      if (!response.ok || payload.status !== 'ok') {
+        throw new Error(payload.error || `Reminder update failed with status ${response.status}`)
+      }
+      setReminders((items) => items.map((item) =>
+        item.id === reminderId ? payload.reminder : item
+      ))
+      showToast('Reminder marked as done.')
+    } catch (error) {
+      console.warn('Kasarita: could not complete reminder.', error)
+      showToast('Could not mark reminder as done. Please try again.')
+    }
+  }
+
+  async function deleteReminder(reminderId) {
+    try {
+      const response = await fetch(`${API_BASE}/reminders/${reminderId}`, { method: 'DELETE' })
+      const payload = await response.json()
+      if (!response.ok || payload.status !== 'ok') {
+        throw new Error(payload.error || `Reminder deletion failed with status ${response.status}`)
+      }
+      setReminders((items) => items.filter((item) => item.id !== reminderId))
+      showToast('Reminder deleted.')
+    } catch (error) {
+      console.warn('Kasarita: could not delete reminder.', error)
+      showToast('Could not delete reminder. Please try again.')
+    }
+  }
+
   useEffect(() => {
     reloadTasks()
+    reloadReminders()
   }, [currentUser?.id])
 
   const lastMsgRef = useRef({ role: '', content: '', time: 0 })
@@ -289,6 +343,7 @@ export function AppProvider({ children }) {
             // If task command executed on ESP32 or backend, refresh task list
             if (payload.tool || payload.status === 'action_completed') {
               reloadTasks()
+              reloadReminders()
             }
           } catch (err) {
             console.warn('WebSocket message parse error:', err)
@@ -516,6 +571,10 @@ export function AppProvider({ children }) {
     state,
     currentUser,
     userData,
+    reminders,
+    remindersLoadError,
+    markReminderDone,
+    deleteReminder,
     level,
     xp,
     theme,

@@ -19,8 +19,10 @@ from dotenv import load_dotenv
 from .mcp import (
     call_tool,
     get_tasks,
+    get_schedule,
     initialize_database,
     interpret_command,
+    format_calendar_date,
     TOOL_DEFINITIONS,
     OPENAI_TOOL_DEFINITIONS,
     clean_for_speech,
@@ -41,7 +43,8 @@ SYSTEM_PROMPT = (
     "2. Keep your answers brief and punchy, usually in 1 to 3 short sentences. Avoid long lectures or essays. "
     "3. NEVER use markdown symbols, asterisks (*), hashtags (#), dashes (-), bullet points, numbered lists, backticks, or robotic formatting. "
     "4. Your response will be read aloud by Text-To-Speech (TTS), so make every word sound natural when spoken out loud. "
-    "5. Maintain context from previous turns in our conversation."
+    "5. Maintain context from previous turns in our conversation. "
+    "6. Finish every response with complete sentences and natural punctuation; never stop mid-sentence."
 )
 
 
@@ -123,6 +126,35 @@ class ToolCallRequest(BaseModel):
 class TaskRequest(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
+
+async def request_ai_completion(base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=45) as client:
+        for token_limit in (512, 768):
+            request_payload = {**payload, "max_tokens": token_limit}
+            response = await client.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"******"},
+                json=request_payload,
+            )
+            response.raise_for_status()
+            completion = response.json()
+            choice = completion["choices"][0]
+            if choice.get("finish_reason") != "length" or token_limit == 768:
+                return choice
+            logger.warning(
+                "AI response reached its %s-token limit; retrying with a larger limit.",
+                token_limit,
+            )
+    raise RuntimeError("AI response could not be completed.")
+
+
+def ensure_terminal_punctuation(text: str) -> str:
+    text = text.rstrip()
+    if text and text[-1] not in ".!?":
+        return f"{text}."
+    return text
+
+
 async def _invoke_ai_tutor(question: str, session_id: str = "default") -> tuple[str, str]:
     import inspect
     try:
@@ -170,15 +202,20 @@ async def chat(req: ChatRequest):
             result = call_tool(tool_name, arguments)
             if tool_name == "create_task":
                 title = arguments.get("title", "task")
-                due = arguments.get("due_date")
+                due = format_calendar_date(result.get("due_date"))
                 reply_text = f"I added the task {title}." if not due else f"I added the task {title} due {due}."
             elif tool_name == "complete_task":
                 reply_text = "I marked that task as completed."
             elif tool_name == "delete_task":
                 reply_text = "I removed that task for you."
+            elif tool_name == "complete_reminder":
+                reply_text = "I marked that reminder as done."
+            elif tool_name == "delete_reminder":
+                reply_text = "I deleted that reminder."
             elif tool_name == "create_reminder":
                 title = arguments.get("title", "reminder")
-                reply_text = f"I created a reminder for {title}."
+                remind_at = format_calendar_date(result.get("remind_at"))
+                reply_text = f"I created a reminder for {title}." if not remind_at else f"I created a reminder for {title} on {remind_at}."
             elif tool_name in ("get_tasks", "get_schedule"):
                 if isinstance(result, list) and len(result) > 0:
                     titles = [item.get("title", "task") for item in result[:3]]
@@ -279,7 +316,7 @@ async def ask_ai_tutor(question: str, session_id: str = "default") -> tuple[str,
         "model": model,
         "messages": messages,
         "temperature": 0.4,
-        "max_tokens": 160,
+        "max_tokens": 512,
     }
 
     try:
@@ -290,8 +327,12 @@ async def ask_ai_tutor(question: str, session_id: str = "default") -> tuple[str,
                 json=payload,
             )
         response.raise_for_status()
-        raw_answer = response.json()["choices"][0]["message"]["content"].strip()
-        answer = clean_for_speech(raw_answer) or raw_answer
+        choice = response.json()["choices"][0]
+        if choice.get("finish_reason") == "length":
+            logger.warning("AI answer was truncated; retrying with a larger token limit.")
+            choice = await request_ai_completion(base_url, payload)
+        raw_answer = choice["message"]["content"].strip()
+        answer = ensure_terminal_punctuation(clean_for_speech(raw_answer) or raw_answer)
     except httpx.HTTPStatusError as error:
         if error.response.status_code == 429:
             return (
@@ -340,7 +381,7 @@ async def ai_route_and_execute(transcript: str, bytes_received: int, device_id: 
         "tools": OPENAI_TOOL_DEFINITIONS,
         "tool_choice": "auto",
         "temperature": 0.2,
-        "max_tokens": 160,
+        "max_tokens": 512,
     }
 
     try:
@@ -353,7 +394,11 @@ async def ai_route_and_execute(transcript: str, bytes_received: int, device_id: 
         if response.status_code != 200:
             return None
 
-        choice = response.json()["choices"][0]["message"]
+        response_choice = response.json()["choices"][0]
+        if response_choice.get("finish_reason") == "length":
+            logger.warning("AI voice response was truncated; retrying with a larger token limit.")
+            response_choice = await request_ai_completion(base_url, payload)
+        choice = response_choice["message"]
         tool_calls = choice.get("tool_calls")
         if tool_calls:
             call_info = tool_calls[0]["function"]
@@ -362,18 +407,22 @@ async def ai_route_and_execute(transcript: str, bytes_received: int, device_id: 
             arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
             result = call_tool(tool_name, arguments)
             action = {"tool": tool_name, "result": result}
-            
             if tool_name == "create_task":
                 title = arguments.get("title", "task")
-                due = arguments.get("due_date")
+                due = format_calendar_date(result.get("due_date"))
                 answer_text = f"I added the task {title}." if not due else f"I added the task {title} due {due}."
             elif tool_name == "complete_task":
                 answer_text = "I marked that task as completed."
             elif tool_name == "delete_task":
                 answer_text = "I removed that task for you."
+            elif tool_name == "complete_reminder":
+                answer_text = "I marked that reminder as done."
+            elif tool_name == "delete_reminder":
+                answer_text = "I deleted that reminder."
             elif tool_name == "create_reminder":
                 title = arguments.get("title", "reminder")
-                answer_text = f"I created a reminder for {title}."
+                remind_at = format_calendar_date(result.get("remind_at"))
+                answer_text = f"I created a reminder for {title}." if not remind_at else f"I created a reminder for {title} on {remind_at}."
             elif tool_name in ("get_tasks", "get_schedule"):
                 if isinstance(result, list) and len(result) > 0:
                     titles = [item.get("title", "task") for item in result[:3]]
@@ -398,7 +447,7 @@ async def ai_route_and_execute(transcript: str, bytes_received: int, device_id: 
 
         content = choice.get("content")
         if content:
-            clean_answer = clean_for_speech(content.strip()) or content.strip()
+            clean_answer = ensure_terminal_punctuation(clean_for_speech(content.strip()) or content.strip())
             add_memory_message(session_id, "user", transcript)
             add_memory_message(session_id, "assistant", clean_answer)
             return AudioResponse(
@@ -430,6 +479,26 @@ def call_mcp_tool(req: ToolCallRequest):
 @app.get("/tasks")
 def list_tasks():
     return {"tasks": get_tasks()}
+
+@app.get("/reminders")
+def list_reminders():
+    return {"reminders": get_schedule()}
+
+@app.patch("/reminders/{reminder_id}")
+def mark_reminder_done(reminder_id: str):
+    try:
+        result = call_tool("complete_reminder", {"reminder_id": reminder_id})
+    except (TypeError, ValueError) as error:
+        return {"status": "error", "error": str(error)}
+    return {"status": "ok", "reminder": result}
+
+@app.delete("/reminders/{reminder_id}")
+def remove_reminder(reminder_id: str):
+    try:
+        call_tool("delete_reminder", {"reminder_id": reminder_id})
+    except (TypeError, ValueError) as error:
+        return {"status": "error", "error": str(error)}
+    return {"status": "ok", "reminder_id": reminder_id}
 
 @app.post("/tasks")
 def create_task_endpoint(req: TaskRequest):
@@ -517,15 +586,20 @@ async def audio(request: Request):
         action = {"tool": tool_name, "result": result}
         if tool_name == "create_task":
             title = arguments.get("title", "task")
-            due = arguments.get("due_date")
+            due = format_calendar_date(result.get("due_date"))
             reply_text = f"I added the task {title}." if not due else f"I added the task {title} due {due}."
         elif tool_name == "complete_task":
             reply_text = "I marked that task as completed."
         elif tool_name == "delete_task":
             reply_text = "I removed that task for you."
+        elif tool_name == "complete_reminder":
+            reply_text = "I marked that reminder as done."
+        elif tool_name == "delete_reminder":
+            reply_text = "I deleted that reminder."
         elif tool_name == "create_reminder":
             title = arguments.get("title", "reminder")
-            reply_text = f"I created a reminder for {title}."
+            remind_at = format_calendar_date(result.get("remind_at"))
+            reply_text = f"I created a reminder for {title}." if not remind_at else f"I created a reminder for {title} on {remind_at}."
         elif tool_name in ("get_tasks", "get_schedule"):
             if isinstance(result, list) and len(result) > 0:
                 titles = [item.get("title", "task") for item in result[:3]]
@@ -715,7 +789,10 @@ async def websocket_endpoint(websocket: WebSocket):
             if not text:
                 continue
 
-            # Try AI tutor first with session memory, fall back to rule-based
+            if interpret_command(text) is not None:
+                await chat(ChatRequest(text=text, device_id=device_id, session_id=session_id))
+                continue
+
             ai_status, reply = await _invoke_ai_tutor(text, session_id=session_id)
             if ai_status not in ("answered", "rate_limited"):
                 _, reply = generate_reply(text)

@@ -22,7 +22,8 @@ bool speakerInit()
         .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
         .communication_format = I2S_COMM_FORMAT_STAND_I2S,
         .dma_buf_count = 8,
-        .dma_buf_len = 1024
+        .dma_buf_len = 1024,
+        .tx_desc_auto_clear = true
     };
 
     i2s_pin_config_t pins = {

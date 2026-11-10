@@ -11,8 +11,12 @@ create table if not exists public.reminders (
     id text primary key,
     title text not null,
     remind_at text,
+    status text not null default 'pending',
     created_at timestamptz not null
 );
+
+alter table public.reminders
+    add column if not exists status text not null default 'pending';
 
 alter table public.tasks enable row level security;
 alter table public.reminders enable row level security;

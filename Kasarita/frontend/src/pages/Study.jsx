@@ -35,8 +35,9 @@ function fmt(secs) {
   return `${m}:${s}`
 }
 
-function CircleTimer({ secondsLeft, totalSeconds, subject }) {
+function CircleTimer({ secondsLeft, totalSeconds, subject, durationMinutes }) {
   const subjectInfo = SUBJECTS.find((s) => s.name === subject) || SUBJECTS[0]
+  const durationInfo = DURATIONS.find((duration) => duration.minutes === durationMinutes)
   const pct = totalSeconds > 0 ? secondsLeft / totalSeconds : 1
   const radius = 100
   const circumference = 2 * Math.PI * radius
@@ -73,6 +74,9 @@ function CircleTimer({ secondsLeft, totalSeconds, subject }) {
         <div className="timer-digits">{fmt(secondsLeft)}</div>
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
           {pct === 0 ? '🎉 Done!' : 'remaining'}
+        </div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+          {durationMinutes} min{durationInfo ? ` · ${durationInfo.desc}` : ' session'}
         </div>
       </div>
     </div>
@@ -150,9 +154,10 @@ export default function Study() {
         {/* Timer Panel */}
         <div className="glass-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.5rem', padding: '2.5rem 2rem' }}>
           <CircleTimer
-            secondsLeft={studyTimer.secondsLeft}
-            totalSeconds={studyTimer.durationMinutes * 60}
-            subject={studyTimer.subject || selectedSubject}
+            secondsLeft={isIdle ? selectedDuration * 60 : studyTimer.secondsLeft}
+            totalSeconds={(isIdle ? selectedDuration : studyTimer.durationMinutes) * 60}
+            subject={isIdle ? selectedSubject : studyTimer.subject || selectedSubject}
+            durationMinutes={isIdle ? selectedDuration : studyTimer.durationMinutes}
           />
 
           {/* Controls */}
@@ -219,7 +224,7 @@ export default function Study() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
           {/* Subject Select */}
           <div className="glass-card">
-            <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>📚 Choose Subject</h3>
+            <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Choose Subject</h3>
             <div className="subject-grid">
               {SUBJECTS.map((sub) => (
                 <button
@@ -238,7 +243,7 @@ export default function Study() {
 
           {/* Duration Select */}
           <div className="glass-card">
-            <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>⏱ Set Duration</h3>
+            <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Set Duration</h3>
             <div className="duration-grid">
               {DURATIONS.map((d) => (
                 <button
@@ -256,7 +261,7 @@ export default function Study() {
 
           {/* Study Techniques */}
           <div className="glass-card">
-            <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>🧠 Study Techniques</h3>
+            <h3 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Study Techniques</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
               {TECHNIQUES.map((t) => (
                 <button
@@ -277,7 +282,7 @@ export default function Study() {
 
       {/* Subject Time Breakdown */}
       <div className="glass-card">
-        <h3 style={{ marginBottom: '1.25rem' }}>📊 Time Per Subject</h3>
+        <h3 style={{ marginBottom: '1.25rem' }}>Time Per Subject</h3>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {SUBJECTS.map((sub) => {
             const mins = subjectTime[sub.name] || 0

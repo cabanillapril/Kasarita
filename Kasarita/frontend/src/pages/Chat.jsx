@@ -29,7 +29,7 @@ export default function Chat() {
             <Bot color="var(--accent-violet)" /> Kasarita AI Companion
           </h1>
           <p className="page-subtitle">
-            Natural, spoken conversational stream with memory for your ESP32-S3 and web companion.
+            Converse with Kasarita
           </p>
         </div>
         {messages.length > 0 && (

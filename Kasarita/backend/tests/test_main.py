@@ -30,6 +30,53 @@ def test_tts_endpoint_returns_16khz_pcm(monkeypatch):
     assert response.content == audio
 
 
+def test_ai_completion_retries_when_answer_hits_token_limit(monkeypatch):
+    import asyncio
+    from app.main import ensure_terminal_punctuation, request_ai_completion
+
+    token_limits = []
+
+    class FakeResponse:
+        def __init__(self, finish_reason, content):
+            self.finish_reason = finish_reason
+            self.content = content
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "choices": [{
+                    "finish_reason": self.finish_reason,
+                    "message": {"content": self.content},
+                }]
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc_value, traceback):
+            pass
+
+        async def post(self, url, headers, json):
+            token_limits.append(json["max_tokens"])
+            if len(token_limits) == 1:
+                return FakeResponse("length", "This answer was cut")
+            return FakeResponse("stop", "This answer was cut off and is now complete.")
+
+    monkeypatch.setattr("app.main.httpx.AsyncClient", FakeAsyncClient)
+    choice = asyncio.run(request_ai_completion("https://example.test/v1", {}))
+
+    assert token_limits == [512, 768]
+    assert choice["message"]["content"].endswith(".")
+    assert ensure_terminal_punctuation("A complete thought") == "A complete thought."
+    assert ensure_terminal_punctuation("Already complete!") == "Already complete!"
+
+
 def test_tts_endpoint_reports_missing_voice_model(monkeypatch):
     def missing_voice():
         from app.main import TTSNotConfiguredError
@@ -42,16 +89,36 @@ def test_tts_endpoint_reports_missing_voice_model(monkeypatch):
     assert response.json()["detail"] == "Piper voice model is not configured."
 
 
-def test_chat_endpoint_returns_intent_and_reply():
+def test_chat_endpoint_returns_intent_and_reply(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "chat-reminders.db"))
     response = client.post(
         "/chat",
-        json={"text": "set a reminder for study", "device_id": "dev-1"},
+        json={"text": "set a reminder for study on November 10, 2030", "device_id": "dev-1"},
     )
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"] == "ok"
-    assert payload["intent"] == "reminder"
-    assert "reminder" in payload["reply"].lower()
+    assert payload["intent"] == "command"
+    assert payload["reply"] == "I created a reminder for study on November 10, 2030."
+
+
+def test_websocket_chat_creates_reminder_visible_in_rest_endpoint(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "websocket-reminders.db"))
+
+    with client.websocket_connect("/ws") as websocket:
+        websocket.send_json({"text": "set a reminder for study on November 10, 2030"})
+        payload = websocket.receive_json()
+
+    assert payload["status"] == "action_completed"
+    assert payload["tool"] == "create_reminder"
+    reminders = client.get("/reminders").json()["reminders"]
+    assert len(reminders) == 1
+    assert reminders[0]["title"] == "study"
+    assert reminders[0]["remind_at"] == "2030-11-10"
 
 
 def test_audio_endpoint_accepts_16_bit_pcm(monkeypatch):
@@ -116,6 +183,8 @@ def test_mcp_tools_can_create_and_complete_task():
         "delete_task",
         "create_reminder",
         "get_schedule",
+        "complete_reminder",
+        "delete_reminder",
     }
 
 
@@ -161,6 +230,58 @@ def test_task_rest_endpoints(tmp_path, monkeypatch):
     assert delete_response.json()["status"] == "ok"
 
 
+def test_reminders_rest_endpoint(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "reminders.db"))
+    create_response = client.post(
+        "/mcp/call",
+        json={"name": "create_reminder", "arguments": {"title": "Call Mom", "remind_at": "2030-11-10"}},
+    )
+    assert create_response.json()["status"] == "ok"
+    reminder = create_response.json()["result"]
+
+    list_response = client.get("/reminders")
+    assert list_response.json()["reminders"] == [reminder]
+    assert reminder["status"] == "pending"
+
+    complete_response = client.patch(f"/reminders/{reminder['id']}")
+    assert complete_response.json()["status"] == "ok"
+    assert complete_response.json()["reminder"]["status"] == "completed"
+    assert client.get("/reminders").json()["reminders"][0]["status"] == "completed"
+
+    delete_response = client.delete(f"/reminders/{reminder['id']}")
+    assert delete_response.json()["status"] == "ok"
+    assert client.get("/reminders").json()["reminders"] == []
+
+
+def test_existing_reminder_database_gets_pending_status_migration(tmp_path, monkeypatch):
+    import sqlite3
+    from app.mcp import get_schedule
+
+    database_path = tmp_path / "legacy-reminders.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.execute(
+            "CREATE TABLE reminders (id TEXT PRIMARY KEY, title TEXT NOT NULL, remind_at TEXT, created_at TEXT NOT NULL)"
+        )
+        connection.execute(
+            "INSERT INTO reminders VALUES (?, ?, ?, ?)",
+            ("reminder-1", "Call Mom", None, "2030-01-01T00:00:00+00:00"),
+        )
+
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(database_path))
+
+    assert get_schedule() == [{
+        "id": "reminder-1",
+        "title": "Call Mom",
+        "remind_at": None,
+        "created_at": "2030-01-01T00:00:00+00:00",
+        "status": "pending",
+    }]
+
+
 def test_voice_command_creates_task_without_ai(monkeypatch):
     monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "add task Math homework tomorrow")
     response = client.post("/audio", content=b"\x00\x00\x01\x00", headers={"Content-Type": "audio/pcm"})
@@ -169,7 +290,104 @@ def test_voice_command_creates_task_without_ai(monkeypatch):
     assert payload["status"] == "action_completed"
     assert payload["action"]["tool"] == "create_task"
     assert payload["action"]["result"]["title"] == "Math homework"
-    assert payload["action"]["result"]["due_date"] == "tomorrow"
+    from app.mcp import resolve_calendar_date
+    assert payload["action"]["result"]["due_date"] == resolve_calendar_date("tomorrow")
+
+
+def test_spoken_calendar_dates_resolve_in_utc_calendar():
+    from datetime import date
+    from app.mcp import extract_calendar_date, interpret_command
+
+    today = date(2026, 11, 10)
+    assert extract_calendar_date("Finish report due on November 10", today) == (
+        "Finish report",
+        "2026-11-10",
+    )
+    assert extract_calendar_date("Finish report tomorrow", today) == (
+        "Finish report",
+        "2026-11-11",
+    )
+    assert extract_calendar_date("Finish report today", today) == (
+        "Finish report",
+        "2026-11-10",
+    )
+    assert extract_calendar_date("Finish report on Thursday", today) == (
+        "Finish report",
+        "2026-11-12",
+    )
+    assert extract_calendar_date("Finish report on Tuesday", today) == (
+        "Finish report",
+        "2026-11-17",
+    )
+    assert extract_calendar_date("Finish report by November 9", today) == (
+        "Finish report",
+        "2027-11-09",
+    )
+    assert extract_calendar_date("Finish report due on November tenth", today) == (
+        "Finish report",
+        "2026-11-10",
+    )
+
+    assert interpret_command("remind me to call Mom on Thursday") == (
+        "create_reminder",
+        {"title": "call Mom", "remind_at": "2026-11-12"},
+    )
+
+
+def test_task_and_reminder_tools_normalize_spoken_dates(tmp_path, monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_KEY", raising=False)
+    monkeypatch.setenv("KASARITA_DB_PATH", str(tmp_path / "calendar.db"))
+    from app.mcp import create_reminder, create_task, resolve_calendar_date, update_task
+
+    task = create_task("Finish report due on November 10, 2030")
+    assert task["title"] == "Finish report"
+    assert task["due_date"] == "2030-11-10"
+    updated = update_task(task["id"], {"due_date": "November 11, 2030"})
+    assert updated["due_date"] == "2030-11-11"
+
+    reminder = create_reminder("Call Mom tomorrow")
+    assert reminder["title"] == "Call Mom"
+    assert reminder["remind_at"] == resolve_calendar_date("tomorrow")
+
+
+def test_create_reminder_retries_legacy_supabase_without_status(monkeypatch):
+    from app.mcp import create_reminder
+
+    requests = []
+
+    def fake_supabase_request(method, table, **kwargs):
+        requests.append(kwargs["json"])
+        if "status" in kwargs["json"]:
+            raise ValueError("Supabase returned HTTP 400: Could not find the 'status' column in the schema cache")
+        return [{**kwargs["json"]}]
+
+    monkeypatch.setattr("app.mcp.use_supabase", lambda: True)
+    monkeypatch.setattr("app.mcp.supabase_request", fake_supabase_request)
+
+    reminder = create_reminder("Call Mom", "2030-11-10")
+
+    assert len(requests) == 2
+    assert "status" in requests[0]
+    assert "status" not in requests[1]
+    assert reminder["status"] == "pending"
+
+
+def test_create_reminder_does_not_retry_other_supabase_errors(monkeypatch):
+    from app.mcp import create_reminder
+
+    def fake_supabase_request(method, table, **kwargs):
+        raise ValueError("Could not reach Supabase")
+
+    monkeypatch.setattr("app.mcp.use_supabase", lambda: True)
+    monkeypatch.setattr("app.mcp.supabase_request", fake_supabase_request)
+
+    try:
+        create_reminder("Call Mom", "2030-11-10")
+    except ValueError as error:
+        assert str(error) == "Could not reach Supabase"
+    else:
+        raise AssertionError("Expected the Supabase error to be raised")
 
 
 def test_voice_question_still_uses_ai(monkeypatch):
@@ -225,7 +443,8 @@ def test_flexible_voice_task_commands(monkeypatch):
     assert res1.json()["status"] == "action_completed"
     assert res1.json()["action"]["tool"] == "create_task"
     assert res1.json()["action"]["result"]["title"] == "Read documentation"
-    assert res1.json()["action"]["result"]["due_date"] == "tomorrow"
+    from app.mcp import resolve_calendar_date
+    assert res1.json()["action"]["result"]["due_date"] == resolve_calendar_date("tomorrow")
 
     # 2. Add a task to prefix
     monkeypatch.setattr("app.main.transcribe_pcm", lambda audio_bytes: "add a task to study embedded systems")
@@ -245,4 +464,3 @@ def test_flexible_voice_task_commands(monkeypatch):
     assert res5.json()["status"] == "action_completed"
     assert res5.json()["action"]["tool"] == "create_task"
     assert res5.json()["action"]["result"]["title"] == "finish embedded systems lab"
-

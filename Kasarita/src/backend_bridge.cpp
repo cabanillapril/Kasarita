@@ -8,10 +8,10 @@
 
 constexpr char WIFI_SSID[] = "esp32";
 constexpr char WIFI_PASSWORD[] = "12345678";
-constexpr char BACKEND_CHAT_URL[] = "http://192.168.1.44:8000/chat";
-constexpr char BACKEND_AUDIO_URL[] = "http://192.168.1.44:8000/audio";
-constexpr char BACKEND_TTS_URL[] = "http://192.168.1.44:8000/tts";
-constexpr uint32_t SPEAKER_DMA_DRAIN_MS = (8UL * 1024UL * 1000UL) / 16000UL;
+constexpr char BACKEND_CHAT_URL[] = "http://192.168.1.14:8000/chat";
+constexpr char BACKEND_AUDIO_URL[] = "http://192.168.1.14:8000/audio";
+constexpr char BACKEND_TTS_URL[] = "http://192.168.1.14:8000/tts";
+constexpr uint32_t SPEAKER_DMA_DRAIN_MS = (8UL * 1024UL * 1000UL) / 16000UL + 100UL;
 
 bool initNetwork()
 {
@@ -128,7 +128,7 @@ bool sendAudioToBackend(const int16_t* audio, size_t bytes, String& response, bo
     Serial.print("Audio response: ");
     Serial.println(body);
 
-    DynamicJsonDocument responseDoc(2048);
+    DynamicJsonDocument responseDoc(4096);
     DeserializationError error = deserializeJson(responseDoc, body);
     if (error) {
         response = body;
@@ -189,38 +189,52 @@ bool speakTextWithBackend(const String& text, String& error)
     }
 
     WiFiClient* stream = http.getStreamPtr();
+    stream->setTimeout(10000);
     uint8_t buffer[1024];
     int remaining = contentLength;
     bool playbackOk = true;
     digitalWrite(I2S_SD_SPK, HIGH);
     delay(10);
     while (remaining > 0) {
-        const int available = stream->available();
-        if (available <= 0) {
-            if (!http.connected()) {
+        const size_t chunkSize = min(sizeof(buffer), static_cast<size_t>(remaining)) & ~static_cast<size_t>(1);
+        size_t bytesRead = 0;
+        while (bytesRead < chunkSize) {
+            if (stream->available() <= 0 && !http.connected()) {
                 playbackOk = false;
                 break;
             }
-            delay(1);
-            continue;
+            const size_t count = stream->readBytes(buffer + bytesRead, chunkSize - bytesRead);
+            if (count == 0) {
+                playbackOk = false;
+                break;
+            }
+            bytesRead += count;
         }
-
-        const size_t requested = min(static_cast<size_t>(available), sizeof(buffer));
-        const size_t chunkSize = min(requested, static_cast<size_t>(remaining)) & ~static_cast<size_t>(1);
-        if (chunkSize == 0) {
-            delay(1);
-            continue;
+        if (!playbackOk) {
+            break;
         }
-        const size_t bytesRead = stream->readBytes(buffer, chunkSize);
-        if (bytesRead == 0) {
+        if (bytesRead % sizeof(int16_t) != 0) {
             playbackOk = false;
             break;
         }
 
         size_t bytesWritten = 0;
-        const esp_err_t writeResult = i2s_write(I2S_NUM_1, buffer, bytesRead, &bytesWritten, portMAX_DELAY);
-        if (writeResult != ESP_OK || bytesWritten != bytesRead) {
-            playbackOk = false;
+        while (bytesWritten < bytesRead) {
+            size_t written = 0;
+            const esp_err_t writeResult = i2s_write(
+                I2S_NUM_1,
+                buffer + bytesWritten,
+                bytesRead - bytesWritten,
+                &written,
+                portMAX_DELAY
+            );
+            if (writeResult != ESP_OK || written == 0) {
+                playbackOk = false;
+                break;
+            }
+            bytesWritten += written;
+        }
+        if (!playbackOk) {
             break;
         }
         remaining -= bytesRead;

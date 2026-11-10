@@ -2,7 +2,8 @@ import os
 import re
 import sqlite3
 import httpx
-from datetime import datetime, timezone
+import calendar
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
@@ -59,6 +60,7 @@ def initialize_database() -> None:
                 id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 remind_at TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL
             );
             CREATE TABLE IF NOT EXISTS conversation_memory (
@@ -70,6 +72,13 @@ def initialize_database() -> None:
             );
             """
         )
+        reminder_columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(reminders)").fetchall()
+        }
+        if "status" not in reminder_columns:
+            connection.execute(
+                "ALTER TABLE reminders ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'"
+            )
 
 
 def clean_for_speech(text: str) -> str:
@@ -180,6 +189,8 @@ TOOL_DEFINITIONS = [
     {"name": "delete_task", "description": "Delete a task."},
     {"name": "create_reminder", "description": "Create a reminder."},
     {"name": "get_schedule", "description": "Return saved reminders."},
+    {"name": "complete_reminder", "description": "Mark a saved reminder as done."},
+    {"name": "delete_reminder", "description": "Delete a saved reminder."},
 ]
 
 OPENAI_TOOL_DEFINITIONS = [
@@ -192,7 +203,7 @@ OPENAI_TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "The title or description of the task to create."},
-                    "due_date": {"type": "string", "description": "Optional due date or relative time, e.g. 'tomorrow', 'today', 'next week'."},
+                    "due_date": {"type": "string", "description": "Optional due date; accepts calendar dates, weekdays, today, and tomorrow."},
                     "priority": {"type": "string", "enum": ["low", "normal", "high"], "description": "Task priority level."}
                 },
                 "required": ["title"]
@@ -244,7 +255,7 @@ OPENAI_TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "title": {"type": "string", "description": "The title of the reminder."},
-                    "remind_at": {"type": "string", "description": "Optional date/time for the reminder."}
+                    "remind_at": {"type": "string", "description": "Optional calendar date or date/time for the reminder; spoken dates are resolved using UTC."}
                 },
                 "required": ["title"]
             }
@@ -257,15 +268,205 @@ OPENAI_TOOL_DEFINITIONS = [
             "description": "Retrieve all saved reminders and schedule items.",
             "parameters": {"type": "object", "properties": {}}
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "complete_reminder",
+            "description": "Mark a saved reminder as done by its ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {"reminder_id": {"type": "string"}},
+                "required": ["reminder_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_reminder",
+            "description": "Delete a saved reminder by its ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {"reminder_id": {"type": "string"}},
+                "required": ["reminder_id"]
+            }
+        }
     }
 ]
 
 
+_MONTHS = {
+    name.casefold(): month
+    for month, name in enumerate(calendar.month_name)
+    if name
+}
+_MONTHS.update({
+    name.casefold(): month
+    for month, name in enumerate(calendar.month_abbr)
+    if name
+})
+_WEEKDAYS = {
+    name.casefold(): weekday
+    for weekday, name in enumerate(calendar.day_name)
+}
+_DAY_WORDS = {
+    "first": 1, "1st": 1,
+    "second": 2, "2nd": 2,
+    "third": 3, "3rd": 3,
+    "fourth": 4, "4th": 4,
+    "fifth": 5, "5th": 5,
+    "sixth": 6, "6th": 6,
+    "seventh": 7, "7th": 7,
+    "eighth": 8, "8th": 8,
+    "ninth": 9, "9th": 9,
+    "tenth": 10, "10th": 10,
+    "eleventh": 11, "11th": 11,
+    "twelfth": 12, "12th": 12,
+    "thirteenth": 13, "13th": 13,
+    "fourteenth": 14, "14th": 14,
+    "fifteenth": 15, "15th": 15,
+    "sixteenth": 16, "16th": 16,
+    "seventeenth": 17, "17th": 17,
+    "eighteenth": 18, "18th": 18,
+    "nineteenth": 19, "19th": 19,
+    "twentieth": 20, "20th": 20,
+    "twenty-first": 21, "21st": 21,
+    "twenty-second": 22, "22nd": 22,
+    "twenty-third": 23, "23rd": 23,
+    "twenty-fourth": 24, "24th": 24,
+    "twenty-fifth": 25, "25th": 25,
+    "twenty-sixth": 26, "26th": 26,
+    "twenty-seventh": 27, "27th": 27,
+    "twenty-eighth": 28, "28th": 28,
+    "twenty-ninth": 29, "29th": 29,
+    "thirtieth": 30, "30th": 30,
+    "thirty-first": 31, "31st": 31,
+}
+_DAY_TOKEN = r"(?:\d{1,2}(?:st|nd|rd|th)?|" + "|".join(
+    sorted((re.escape(word) for word in _DAY_WORDS), key=len, reverse=True)
+) + r")"
+_MONTH_TOKEN = "|".join(sorted((re.escape(month) for month in _MONTHS), key=len, reverse=True))
+_DATE_TOKEN = (
+    rf"(?:\d{{4}}-\d{{2}}-\d{{2}}|today|tomorrow|tonight|next\s+week|"
+    rf"(?:(?:next|this)\s+)?(?:{'|'.join(_WEEKDAYS)})|"
+    rf"(?:{_MONTH_TOKEN})\.?\s+{_DAY_TOKEN}(?:,?\s+\d{{4}})?|"
+    rf"(?:the\s+)?{_DAY_TOKEN}\s+(?:of\s+)?(?:{_MONTH_TOKEN})\.?(?:,?\s+\d{{4}})?)"
+)
+_DATE_PHRASE = re.compile(
+    rf"(?<!\w)(?P<phrase>(?:(?:due|deadline)(?:\s+on)?|on|by|for)\s+)?"
+    rf"(?P<date>{_DATE_TOKEN})(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def _day_number(day_text: str) -> int:
+    normalized = day_text.casefold()
+    if normalized in _DAY_WORDS:
+        return _DAY_WORDS[normalized]
+    return int(re.sub(r"(st|nd|rd|th)$", "", normalized))
+
+
+def _month_number(month_text: str) -> int:
+    return _MONTHS[month_text.rstrip(".").casefold()]
+
+
+def _make_month_day(month: int, day: int, year: Optional[int], today: date) -> date:
+    candidate_year = year or today.year
+    while True:
+        try:
+            candidate = date(candidate_year, month, day)
+        except ValueError:
+            if year is not None:
+                raise
+            candidate_year += 1
+            continue
+        if year is not None or candidate >= today:
+            return candidate
+        candidate_year += 1
+
+
+def resolve_calendar_date(value: str, today: Optional[date] = None) -> Optional[str]:
+    """Resolve a spoken calendar date to an ISO date in UTC's calendar."""
+    reference = today or datetime.now(timezone.utc).date()
+    text = value.strip().casefold()
+    text = re.sub(r"^(?:(?:due|deadline)(?:\s+on)?|on|by|for)\s+", "", text)
+
+    if text in {"today", "tonight"}:
+        return reference.isoformat()
+    if text == "tomorrow":
+        return (reference + timedelta(days=1)).isoformat()
+    if text == "next week":
+        return (reference + timedelta(days=7)).isoformat()
+
+    weekday_match = re.fullmatch(r"(?:(?:next|this)\s+)?([a-z]+)", text)
+    if weekday_match and weekday_match.group(1) in _WEEKDAYS:
+        target = _WEEKDAYS[weekday_match.group(1)]
+        days_ahead = (target - reference.weekday()) % 7 or 7
+        return (reference + timedelta(days=days_ahead)).isoformat()
+
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        pass
+
+    year_match = re.search(r"\b(19|20)\d{2}\b", text)
+    year = int(year_match.group()) if year_match else None
+    date_text = re.sub(r",?\s*\b(19|20)\d{2}\b", "", text).strip()
+    month_first = re.fullmatch(rf"({_MONTH_TOKEN})\.?\s+({_DAY_TOKEN})", date_text)
+    day_first = re.fullmatch(rf"(?:the\s+)?({_DAY_TOKEN})\s+(?:of\s+)?({_MONTH_TOKEN})\.?", date_text)
+    if month_first:
+        month = _month_number(month_first.group(1))
+        day = _day_number(month_first.group(2))
+    elif day_first:
+        day = _day_number(day_first.group(1))
+        month = _month_number(day_first.group(2))
+    else:
+        return None
+
+    try:
+        return _make_month_day(month, day, year, reference).isoformat()
+    except ValueError:
+        return None
+
+
+def extract_calendar_date(text: str, today: Optional[date] = None) -> tuple[str, Optional[str]]:
+    match = _DATE_PHRASE.search(text)
+    if match is None:
+        return text.strip(" .,;:!?"), None
+
+    resolved = resolve_calendar_date(match.group("date"), today)
+    if resolved is None:
+        return text.strip(" .,;:!?"), None
+    title = f"{text[:match.start()]} {text[match.end():]}".strip(" .,;:!?")
+    title = re.sub(r"\s+", " ", title)
+    return title, resolved
+
+
+def _normalize_date_value(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Date values must be strings")
+    resolved = resolve_calendar_date(value)
+    return resolved or value
+
+
+def format_calendar_date(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value).strftime("%B %d, %Y").replace(" 0", " ")
+    except ValueError:
+        return value
+
+
 def create_task(title: str, due_date: Optional[str] = None, priority: str = "normal") -> dict[str, Any]:
+    title, extracted_date = extract_calendar_date(title)
     task = {
         "id": str(uuid4()),
-        "title": title.strip(),
-        "due_date": due_date,
+        "title": title,
+        "due_date": _normalize_date_value(due_date) if due_date is not None else extracted_date,
         "priority": priority,
         "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -309,6 +510,13 @@ def complete_task(task_id: str) -> dict[str, Any]:
 def update_task(task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
     task_id = find_task_id(task_id)
     allowed = {key: value for key, value in fields.items() if key in {"title", "due_date", "priority", "status"}}
+    if "title" in allowed:
+        title, extracted_date = extract_calendar_date(str(allowed["title"]))
+        allowed["title"] = title
+        if "due_date" not in allowed and extracted_date is not None:
+            allowed["due_date"] = extracted_date
+    if "due_date" in allowed:
+        allowed["due_date"] = _normalize_date_value(allowed["due_date"])
     if not allowed:
         raise ValueError("No updatable task fields supplied")
     if use_supabase():
@@ -338,21 +546,86 @@ def delete_task(task_id: str) -> None:
 
 
 def create_reminder(title: str, remind_at: Optional[str] = None) -> dict[str, Any]:
+    title, extracted_date = extract_calendar_date(title)
     reminder = {
         "id": str(uuid4()),
-        "title": title.strip(),
-        "remind_at": remind_at,
+        "title": title,
+        "remind_at": _normalize_date_value(remind_at) if remind_at is not None else extracted_date,
+        "status": "pending",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     if use_supabase():
-        return supabase_request("POST", "reminders", json=reminder)[0]
+        try:
+            result = supabase_request("POST", "reminders", json=reminder)
+        except ValueError as error:
+            detail = str(error).lower()
+            missing_status_column = (
+                "status" in detail
+                and ("column" in detail or "schema cache" in detail)
+            )
+            if not missing_status_column:
+                raise
+
+            legacy_reminder = {key: value for key, value in reminder.items() if key != "status"}
+            result = supabase_request("POST", "reminders", json=legacy_reminder)
+            if result:
+                result[0].setdefault("status", "pending")
+                return result[0]
+            legacy_reminder["status"] = "pending"
+            return legacy_reminder
+        return result[0]
     initialize_database()
     with connect() as connection:
         connection.execute(
-            "INSERT INTO reminders (id, title, remind_at, created_at) VALUES (?, ?, ?, ?)",
+            "INSERT INTO reminders (id, title, remind_at, status, created_at) VALUES (?, ?, ?, ?, ?)",
             tuple(reminder.values()),
         )
     return reminder
+
+
+def complete_reminder(reminder_id: str) -> dict[str, Any]:
+    if use_supabase():
+        result = supabase_request(
+            "PATCH",
+            "reminders",
+            params={"id": f"eq.{reminder_id}"},
+            json={"status": "completed"},
+        )
+        if result:
+            return result[0]
+        raise ValueError(f"Reminder not found: {reminder_id}")
+
+    initialize_database()
+    with connect() as connection:
+        connection.execute(
+            "UPDATE reminders SET status = 'completed' WHERE id = ?",
+            (reminder_id,),
+        )
+        row = connection.execute(
+            "SELECT * FROM reminders WHERE id = ?",
+            (reminder_id,),
+        ).fetchone()
+    if row is None:
+        raise ValueError(f"Reminder not found: {reminder_id}")
+    return row_to_dict(row)
+
+
+def delete_reminder(reminder_id: str) -> None:
+    if use_supabase():
+        result = supabase_request(
+            "DELETE",
+            "reminders",
+            params={"id": f"eq.{reminder_id}", "select": "id"},
+        )
+        if not result:
+            raise ValueError(f"Reminder not found: {reminder_id}")
+        return
+
+    initialize_database()
+    with connect() as connection:
+        cursor = connection.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+    if cursor.rowcount == 0:
+        raise ValueError(f"Reminder not found: {reminder_id}")
 
 
 def get_schedule() -> list[dict[str, Any]]:
@@ -372,6 +645,8 @@ TOOL_HANDLERS = {
     "delete_task": delete_task,
     "create_reminder": create_reminder,
     "get_schedule": get_schedule,
+    "complete_reminder": complete_reminder,
+    "delete_reminder": delete_reminder,
 }
 
 
@@ -407,22 +682,30 @@ def interpret_command(text: str) -> Optional[tuple[str, dict[str, Any]]]:
     cleaned = text.strip()
     normalized = " ".join(cleaned.lower().split())
 
+    # Reminder creation must precede task creation so "remind me to" is not a task.
+    reminder_pattern = (
+        r"^(can\s+you\s+|could\s+you\s+|please\s+)?"
+        r"(remind\s+me(?:\s+to)?|create\s+(a\s+)?reminder|add\s+(a\s+)?reminder|set\s+(a\s+)?reminder)"
+        r"[,:\-\s]+\s*"
+    )
+    if re.search(reminder_pattern, normalized):
+        title = re.sub(reminder_pattern, "", cleaned, flags=re.IGNORECASE).strip(".,;:!? ")
+        title = re.sub(r"^(?:to|for)\s+", "", title, flags=re.IGNORECASE)
+        title, remind_at = extract_calendar_date(title)
+        if title:
+            return "create_reminder", {"title": title, "remind_at": remind_at}
+
     # Task Creation
     create_pattern = (
         r"^(can\s+you\s+|could\s+you\s+|please\s+)?"
         r"(add\s+(a\s+)?task(\s+to)?|create\s+(a\s+)?task(\s+to)?|new\s+task(\s+to)?|"
-        r"remind\s+me\s+to|remember\s+to|i\s+need\s+to|put\s+on\s+my\s+task\s+list|"
+        r"remember\s+to|i\s+need\s+to|put\s+on\s+my\s+task\s+list|"
         r"make\s+a\s+task|schedule\s+task|todo)"
         r"[,:\-\s]+\s*"
     )
     if re.search(create_pattern, normalized):
         title = re.sub(create_pattern, "", cleaned, flags=re.IGNORECASE).strip(".,;:!? ")
-        due_date = None
-        for date_keyword in ["tomorrow", "today", "tonight", "next week"]:
-            if re.search(r"\b" + date_keyword + r"\b", title, flags=re.IGNORECASE):
-                due_date = date_keyword
-                title = re.sub(r"\s+\b" + date_keyword + r"\b", "", title, flags=re.IGNORECASE).strip(".,;:!? ")
-                break
+        title, due_date = extract_calendar_date(title)
         if title:
             return "create_task", {"title": title, "due_date": due_date}
 
@@ -450,17 +733,6 @@ def interpret_command(text: str) -> Optional[tuple[str, dict[str, Any]]]:
         if raw_target:
             target_id = find_task_id(raw_target)
             return "delete_task", {"task_id": target_id}
-
-    # Reminders Creation
-    reminder_pattern = (
-        r"^(can\s+you\s+|could\s+you\s+|please\s+)?"
-        r"(remind\s+me|create\s+reminder|add\s+reminder|set\s+reminder)"
-        r"[,:\-\s]+\s*(to\s+)?"
-    )
-    if re.search(reminder_pattern, normalized):
-        title = re.sub(reminder_pattern, "", cleaned, flags=re.IGNORECASE).strip(".,;:!? ")
-        if title:
-            return "create_reminder", {"title": title}
 
     # Task Listing / Retrieval
     clean_no_punc = normalized.strip(".,;:!? ")

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useApp } from '../context/store.jsx'
-import { Sparkles, CheckCircle2, Circle, Flame, Timer, ArrowRight, Trophy, BookOpen, ChevronLeft, ChevronRight, Lightbulb } from 'lucide-react'
+import { Sparkles, Check, CheckCircle2, Circle, Flame, Timer, ArrowRight, Trophy, BookOpen, ChevronLeft, ChevronRight, Lightbulb, Bell, Trash2 } from 'lucide-react'
+import { fmtDate } from '../utils.js'
 
 const CS_FACTS = [
   { emoji: '🧮', fact: 'The first computer bug was an actual bug — a moth found trapped in a relay of the Harvard Mark II computer in 1947 by Grace Hopper.' },
@@ -31,6 +32,10 @@ const CS_FACTS = [
 export default function Dashboard() {
   const {
     currentUser,
+    reminders,
+    remindersLoadError,
+    markReminderDone,
+    deleteReminder,
     level,
     xp,
     currentLevelXp,
@@ -66,6 +71,15 @@ export default function Dashboard() {
   const quests = userData?.gamification?.quests || []
   const messages = userData?.messages || []
   const recentMessages = messages.slice(-3)
+  const sortedReminders = [...reminders].sort((a, b) =>
+    Number(a.status === 'completed') - Number(b.status === 'completed') ||
+    (a.remind_at || '9999-12-31').localeCompare(b.remind_at || '9999-12-31')
+  )
+
+  function sentenceCase(value) {
+    const text = value.trim().toLocaleLowerCase()
+    return text ? text[0].toLocaleUpperCase() + text.slice(1) : text
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
@@ -225,6 +239,58 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      <section className="glass-card" aria-labelledby="dashboard-reminders-title">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '1rem' }}>
+          <Bell size={18} color="var(--accent-amber)" />
+          <h2 id="dashboard-reminders-title" style={{ margin: 0, fontSize: '1.1rem' }}>Reminders</h2>
+        </div>
+        {remindersLoadError ? (
+          <p style={{ color: 'var(--text-muted)', margin: 0 }}>Reminders could not be loaded. Please try again later.</p>
+        ) : sortedReminders.length === 0 ? (
+          <p style={{ color: 'var(--text-muted)', margin: 0 }}>No reminders yet.</p>
+        ) : (
+          <div className="dashboard-reminder-list" role="region" aria-label="Reminder list" tabIndex={0}>
+            {sortedReminders.map((reminder) => (
+              <div
+                key={reminder.id}
+                className={`dashboard-reminder-row${reminder.status === 'completed' ? ' completed' : ''}`}
+              >
+                <div className="dashboard-reminder-details">
+                  <span className="dashboard-reminder-title">{sentenceCase(reminder.title)}</span>
+                  <span className="dashboard-reminder-date">
+                    {reminder.remind_at ? fmtDate(reminder.remind_at) : 'Date not set'}
+                  </span>
+                </div>
+                <div className="dashboard-reminder-actions">
+                  {reminder.status === 'completed' ? (
+                    <span className="dashboard-reminder-done">
+                      <CheckCircle2 size={16} aria-hidden="true" /> Done
+                    </span>
+                  ) : (
+                    <button
+                      className="icon-btn"
+                      onClick={() => markReminderDone(reminder.id)}
+                      aria-label={`Mark ${sentenceCase(reminder.title)} as done`}
+                      title="Mark as done"
+                    >
+                      <Check size={16} />
+                    </button>
+                  )}
+                  <button
+                    className="icon-btn danger"
+                    onClick={() => deleteReminder(reminder.id)}
+                    aria-label={`Delete ${sentenceCase(reminder.title)}`}
+                    title="Delete reminder"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       {/* CS Fun Fact Card (Did You Know?) */}
       <div className="funfact-card">

@@ -397,6 +397,64 @@ main.main-content {
   transform: translateY(-2px);
 }
 
+.dashboard-reminder-list {
+  max-height: 168px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+.dashboard-reminder-row {
+  box-sizing: border-box;
+  height: 56px;
+  min-height: 56px;
+  flex: 0 0 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border-card);
+}
+
+.dashboard-reminder-details {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.dashboard-reminder-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-reminder-date {
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.dashboard-reminder-row.completed .dashboard-reminder-title {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.dashboard-reminder-actions {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.dashboard-reminder-done {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--accent-green, #10b981);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 /* Page Headers */
 .page-header {
   display: flex;
