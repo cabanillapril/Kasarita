@@ -569,7 +569,28 @@ def update_task(task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
     if not allowed:
         raise ValueError("No updatable task fields supplied")
     if use_supabase():
-        result = supabase_request("PATCH", "tasks", params={"id": f"eq.{task_id}"}, json=allowed)
+        try:
+            result = supabase_request("PATCH", "tasks", params={"id": f"eq.{task_id}"}, json=allowed)
+        except ValueError as error:
+            detail = str(error).lower()
+            missing_subject_column = (
+                "subject" in detail
+                and ("column" in detail or "schema cache" in detail)
+            )
+            if not missing_subject_column or allowed.get("subject") != "General":
+                raise
+
+            legacy_fields = {key: value for key, value in allowed.items() if key != "subject"}
+            result = supabase_request(
+                "PATCH",
+                "tasks",
+                params={"id": f"eq.{task_id}"},
+                json=legacy_fields,
+            )
+            if result:
+                result[0].setdefault("subject", "General")
+                return result[0]
+            raise ValueError(f"Task not found: {task_id}")
         if result:
             return result[0]
         raise ValueError(f"Task not found: {task_id}")

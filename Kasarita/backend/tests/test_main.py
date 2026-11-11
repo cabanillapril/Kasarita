@@ -283,6 +283,32 @@ def test_create_voice_task_works_with_legacy_supabase_schema(monkeypatch):
     assert task["subject"] == "General"
 
 
+def test_update_task_works_with_legacy_supabase_schema(monkeypatch):
+    from app.mcp import update_task
+
+    requests = []
+
+    def fake_supabase_request(method, table, **kwargs):
+        requests.append(kwargs["json"])
+        if "subject" in kwargs["json"]:
+            raise ValueError("Supabase returned HTTP 400: Could not find the 'subject' column in the schema cache")
+        return [{"id": "task-1", **kwargs["json"]}]
+
+    monkeypatch.setattr("app.mcp.use_supabase", lambda: True)
+    monkeypatch.setattr("app.mcp.find_task_id", lambda task_id: task_id)
+    monkeypatch.setattr("app.mcp.supabase_request", fake_supabase_request)
+
+    task = update_task("task-1", {"title": "Renamed task", "subject": "General"})
+
+    assert len(requests) == 2
+    assert requests[0]["title"] == "Renamed task"
+    assert "subject" in requests[0]
+    assert requests[1]["title"] == "Renamed task"
+    assert "subject" not in requests[1]
+    assert task["title"] == "Renamed task"
+    assert task["subject"] == "General"
+
+
 def test_custom_subject_requires_updated_supabase_schema(monkeypatch):
     from app.mcp import create_task
 

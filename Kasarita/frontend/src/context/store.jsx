@@ -509,28 +509,46 @@ export function AppProvider({ children }) {
     showToast(`Task created: "${normalizedTask.title}"`)
   }
 
-  function updateTask(id, task) {
+  async function updateTask(id, task) {
     if (!currentUser) return
+    const userId = currentUser.id
     const updatedTask = { ...task, title: cap(task.title.trim()), subject: task.subject || task.category || 'General' }
-    fetch(`${API_BASE}/tasks/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        arguments: {
-          title: updatedTask.title,
-          subject: updatedTask.subject,
-          due_date: updatedTask.due,
-          priority: (updatedTask.priority || 'Medium').toLowerCase(),
-          status: updatedTask.status === 'Done' ? 'completed' : 'pending'
-        }
-      })
-    }).catch((error) => console.warn('Kasarita: could not sync task changes.', error))
+    const previousTask = userData.tasks.find((item) => item.id === id)
 
-    mutateUserData(currentUser.id, (d) => ({
+    mutateUserData(userId, (d) => ({
       ...d,
       tasks: d.tasks.map((item) => item.id === id ? { ...item, ...updatedTask } : item)
     }))
-    showToast(`Task updated: "${updatedTask.title}"`)
+
+    try {
+      const response = await fetch(`${API_BASE}/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          arguments: {
+            title: updatedTask.title,
+            subject: updatedTask.subject,
+            due_date: updatedTask.due,
+            priority: (updatedTask.priority || 'Medium').toLowerCase(),
+            status: updatedTask.status === 'Done' ? 'completed' : 'pending'
+          }
+        })
+      })
+      const payload = await response.json()
+      if (!response.ok || payload.status !== 'ok' || !payload.task) {
+        throw new Error(payload.error || `Task update failed with status ${response.status}`)
+      }
+      showToast(`Task updated: "${updatedTask.title}"`)
+    } catch (error) {
+      console.warn('Kasarita: could not sync task changes.', error)
+      if (previousTask) {
+        mutateUserData(userId, (d) => ({
+          ...d,
+          tasks: d.tasks.map((item) => item.id === id ? previousTask : item)
+        }))
+      }
+      showToast('Could not save task changes. Please try again.')
+    }
   }
 
   function toggleTask(id) {
