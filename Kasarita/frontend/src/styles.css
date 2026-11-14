@@ -187,14 +187,14 @@ h1, h2, h3, h4, .font-heading {
   width: 34px;
   height: 34px;
   border-radius: 50%;
-  background: var(--gradient-streak);
+  background: var(--gradient-xp);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 700;
   color: white;
   font-size: 0.8rem;
-  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.3);
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.3);
 }
 
 /* Sidebar Drawer Overlay */

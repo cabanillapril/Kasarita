@@ -116,13 +116,13 @@ export default function Settings() {
     try {
       const res = await fetch(`${API_BASE}/tasks`, { signal: AbortSignal.timeout(5000) })
       if (res.ok) {
-        showToast('✅ Backend connected successfully!')
+        showToast('Backend connected successfully!')
         setDeviceStatus((d) => ({ ...d, backendOk: true }))
       } else {
-        showToast('⚠️ Backend responded with an error.')
+        showToast('Backend responded with an error.')
       }
     } catch {
-      showToast('❌ Cannot reach backend. Check that it is running.')
+      showToast('Cannot reach backend. Check that it is running.')
     } finally {
       setChecking(false)
     }
@@ -135,12 +135,12 @@ export default function Settings() {
       if (res.ok) {
         const data = await res.json()
         setDeviceStatus((d) => ({ ...d, connected: data.connected }))
-        showToast(data.connected ? '✅ ESP32 device online!' : '📡 ESP32 device not detected.')
+        showToast(data.connected ? 'ESP32 device online!' : 'ESP32 device not detected.')
       } else {
-        showToast('⚠️ Could not reach device status endpoint.')
+        showToast('Could not reach device status endpoint.')
       }
     } catch {
-      showToast('📡 Device status endpoint not available yet.')
+      showToast('Device status endpoint not available yet.')
     } finally {
       setChecking(false)
     }
@@ -234,10 +234,7 @@ export default function Settings() {
         </Section>
       </div>
 
-      <Section title="Study Subjects" icon={<BookOpen size={18} />}>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: 0 }}>
-          These subjects appear in Study Focus. Renaming a subject keeps its study history; removing one only hides it from new sessions.
-        </p>
+      <Section title="Subjects" icon={<BookOpen size={18} />}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {subjects.map((subject) => (
             <div key={subject} className="setting-row" style={{ gap: '0.75rem' }}>

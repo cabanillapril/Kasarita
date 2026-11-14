@@ -104,19 +104,19 @@ export default function Progress() {
           </div>
           <div style={{ display: 'flex', gap: '2rem', marginTop: '1rem' }}>
             <div>
-              <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-amber)' }}>{streak}</div>
+              <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-white)' }}>{streak}</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Day Streak</div>
             </div>
             <div>
-              <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-emerald)' }}>{unlockedCount}</div>
+              <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-white)' }}>{unlockedCount}</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Achievements</div>
             </div>
             <div>
-              <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-violet)' }}>{totalMinutes}m</div>
+              <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-white)' }}>{totalMinutes}m</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Time Studied</div>
             </div>
             <div>
-              <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-cyan)' }}>{questsDone}/{quests.length}</div>
+              <div style={{ fontWeight: '800', fontSize: '1.3rem', color: 'var(--accent-white)' }}>{questsDone}/{quests.length}</div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Quests Done</div>
             </div>
           </div>

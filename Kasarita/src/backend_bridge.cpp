@@ -8,9 +8,10 @@
 
 constexpr char WIFI_SSID[] = "esp32";
 constexpr char WIFI_PASSWORD[] = "12345678";
-constexpr char BACKEND_CHAT_URL[] = "http://192.168.1.44:8000/chat";
-constexpr char BACKEND_AUDIO_URL[] = "http://192.168.1.44:8000/audio";
-constexpr char BACKEND_TTS_URL[] = "http://192.168.1.44:8000/tts";
+constexpr char BACKEND_CHAT_URL[] = "http://192.168.137.1:8000/chat";
+constexpr char BACKEND_AUDIO_URL[] = "http://192.168.137.1:8000/audio";
+constexpr char BACKEND_TTS_URL[] = "http://192.168.137.1:8000/tts";
+constexpr uint32_t BACKEND_CHAT_TIMEOUT_MS = 60000;
 constexpr uint32_t SPEAKER_DMA_DRAIN_MS = (8UL * 1024UL * 1000UL) / 16000UL + 100UL;
 
 bool initNetwork()
@@ -49,7 +50,7 @@ bool sendCommandToBackend(const String& command, String& response)
     Serial.println(BACKEND_CHAT_URL);
 
     http.begin(BACKEND_CHAT_URL);
-    http.setTimeout(10000);
+    http.setTimeout(BACKEND_CHAT_TIMEOUT_MS);
     http.addHeader("Content-Type", "application/json");
 
     DynamicJsonDocument doc(512);
@@ -86,11 +87,14 @@ bool sendCommandToBackend(const String& command, String& response)
         return false;
     }
 
+    const String error = http.errorToString(httpCode);
     String errorBody = http.getString();
     http.end();
-    response = "HTTP request failed";
+    response = String("HTTP request failed: ") + error;
     Serial.print("HTTP error body: ");
     Serial.println(errorBody);
+    Serial.print("HTTP error: ");
+    Serial.println(error);
     return false;
 }
 
